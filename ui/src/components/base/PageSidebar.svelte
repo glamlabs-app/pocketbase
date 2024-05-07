@@ -17,7 +17,7 @@
     }
 </script>
 
-<aside bind:this={sidebarElem} class="page-sidebar {classes}">
+<aside bind:this={sidebarElem} class="page-sidebar {classes}" style="max-width: 1000px !important;">
     <slot />
 </aside>
 
