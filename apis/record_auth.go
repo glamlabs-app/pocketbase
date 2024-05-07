@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
+	"sort"
 
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/dbx"
@@ -65,26 +66,23 @@ func (api *recordAuthApi) authRefresh(c echo.Context) error {
 	event.Collection = record.Collection()
 	event.Record = record
 
-	handlerErr := api.app.OnRecordBeforeAuthRefreshRequest().Trigger(event, func(e *core.RecordAuthRefreshEvent) error {
-		return RecordAuthResponse(api.app, e.HttpContext, e.Record, nil)
+	return api.app.OnRecordBeforeAuthRefreshRequest().Trigger(event, func(e *core.RecordAuthRefreshEvent) error {
+		return api.app.OnRecordAfterAuthRefreshRequest().Trigger(event, func(e *core.RecordAuthRefreshEvent) error {
+			return RecordAuthResponse(api.app, e.HttpContext, e.Record, nil)
+		})
 	})
-
-	if handlerErr == nil {
-		if err := api.app.OnRecordAfterAuthRefreshRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	}
-
-	return handlerErr
 }
 
 type providerInfo struct {
-	Name                string `json:"name"`
-	State               string `json:"state"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	State       string `json:"state"`
+	AuthUrl     string `json:"authUrl"`
+	// technically could be omitted if the provider doesn't support PKCE,
+	// but to avoid breaking existing typed clients we'll return them as empty string
 	CodeVerifier        string `json:"codeVerifier"`
 	CodeChallenge       string `json:"codeChallenge"`
 	CodeChallengeMethod string `json:"codeChallengeMethod"`
-	AuthUrl             string `json:"authUrl"`
 }
 
 func (api *recordAuthApi) authMethods(c echo.Context) error {
@@ -96,12 +94,14 @@ func (api *recordAuthApi) authMethods(c echo.Context) error {
 	authOptions := collection.AuthOptions()
 
 	result := struct {
+		AuthProviders    []providerInfo `json:"authProviders"`
 		UsernamePassword bool           `json:"usernamePassword"`
 		EmailPassword    bool           `json:"emailPassword"`
-		AuthProviders    []providerInfo `json:"authProviders"`
+		OnlyVerified     bool           `json:"onlyVerified"`
 	}{
 		UsernamePassword: authOptions.AllowUsernameAuth,
 		EmailPassword:    authOptions.AllowEmailAuth,
+		OnlyVerified:     authOptions.OnlyVerified,
 		AuthProviders:    []providerInfo{},
 	}
 
@@ -117,45 +117,60 @@ func (api *recordAuthApi) authMethods(c echo.Context) error {
 
 		provider, err := auth.NewProviderByName(name)
 		if err != nil {
-			if api.app.IsDebug() {
-				log.Println(err)
-			}
+			api.app.Logger().Debug("Missing or invalid provider name", slog.String("name", name))
 			continue // skip provider
 		}
 
 		if err := config.SetupProvider(provider); err != nil {
-			if api.app.IsDebug() {
-				log.Println(err)
-			}
+			api.app.Logger().Debug(
+				"Failed to setup provider",
+				slog.String("name", name),
+				slog.String("error", err.Error()),
+			)
 			continue // skip provider
 		}
 
-		state := security.RandomString(30)
-		codeVerifier := security.RandomString(43)
-		codeChallenge := security.S256Challenge(codeVerifier)
-		codeChallengeMethod := "S256"
-		urlOpts := []oauth2.AuthCodeOption{
-			oauth2.SetAuthURLParam("code_challenge", codeChallenge),
-			oauth2.SetAuthURLParam("code_challenge_method", codeChallengeMethod),
+		info := providerInfo{
+			Name:        name,
+			DisplayName: provider.DisplayName(),
+			State:       security.RandomString(30),
 		}
 
-		if name == auth.NameApple {
+		if info.DisplayName == "" {
+			info.DisplayName = name
+		}
+
+		urlOpts := []oauth2.AuthCodeOption{}
+
+		// custom providers url options
+		switch name {
+		case auth.NameApple:
 			// see https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_js/incorporating_sign_in_with_apple_into_other_platforms#3332113
 			urlOpts = append(urlOpts, oauth2.SetAuthURLParam("response_mode", "query"))
 		}
 
-		result.AuthProviders = append(result.AuthProviders, providerInfo{
-			Name:                name,
-			State:               state,
-			CodeVerifier:        codeVerifier,
-			CodeChallenge:       codeChallenge,
-			CodeChallengeMethod: codeChallengeMethod,
-			AuthUrl: provider.BuildAuthUrl(
-				state,
-				urlOpts...,
-			) + "&redirect_uri=", // empty redirect_uri so that users can append their redirect url
-		})
+		if provider.PKCE() {
+			info.CodeVerifier = security.RandomString(43)
+			info.CodeChallenge = security.S256Challenge(info.CodeVerifier)
+			info.CodeChallengeMethod = "S256"
+			urlOpts = append(urlOpts,
+				oauth2.SetAuthURLParam("code_challenge", info.CodeChallenge),
+				oauth2.SetAuthURLParam("code_challenge_method", info.CodeChallengeMethod),
+			)
+		}
+
+		info.AuthUrl = provider.BuildAuthUrl(
+			info.State,
+			urlOpts...,
+		) + "&redirect_uri=" // empty redirect_uri so that users can append their redirect url
+
+		result.AuthProviders = append(result.AuthProviders, info)
 	}
+
+	// sort providers
+	sort.SliceStable(result.AuthProviders, func(i, j int) bool {
+		return result.AuthProviders[i].Name < result.AuthProviders[j].Name
+	})
 
 	return c.JSON(http.StatusOK, result)
 }
@@ -186,14 +201,15 @@ func (api *recordAuthApi) authWithOAuth2(c echo.Context) error {
 	event.HttpContext = c
 	event.Collection = collection
 	event.ProviderName = form.Provider
-	event.IsNewRecord = false
 
 	form.SetBeforeNewRecordCreateFunc(func(createForm *forms.RecordUpsert, authRecord *models.Record, authUser *auth.AuthUser) error {
 		return createForm.DrySubmit(func(txDao *daos.Dao) error {
 			event.IsNewRecord = true
+
 			// clone the current request data and assign the form create data as its body data
-			requestData := *RequestData(c)
-			requestData.Data = form.CreateData
+			requestInfo := *RequestInfo(c)
+			requestInfo.Context = models.RequestInfoContextOAuth2
+			requestInfo.Data = form.CreateData
 
 			createRuleFunc := func(q *dbx.SelectQuery) error {
 				admin, _ := c.Get(ContextAdminKey).(*models.Admin)
@@ -206,7 +222,7 @@ func (api *recordAuthApi) authWithOAuth2(c echo.Context) error {
 				}
 
 				if *collection.CreateRule != "" {
-					resolver := resolvers.NewRecordFieldResolver(txDao, collection, &requestData, true)
+					resolver := resolvers.NewRecordFieldResolver(txDao, collection, &requestInfo, true)
 					expr, err := search.FilterData(*collection.CreateRule).BuildExpr(resolver)
 					if err != nil {
 						return err
@@ -231,6 +247,7 @@ func (api *recordAuthApi) authWithOAuth2(c echo.Context) error {
 			event.Record = data.Record
 			event.OAuth2User = data.OAuth2User
 			event.ProviderClient = data.ProviderClient
+			event.IsNewRecord = data.Record == nil
 
 			return api.app.OnRecordBeforeAuthWithOAuth2Request().Trigger(event, func(e *core.RecordAuthWithOAuth2Event) error {
 				data.Record = e.Record
@@ -251,16 +268,12 @@ func (api *recordAuthApi) authWithOAuth2(c echo.Context) error {
 					IsNew:    event.IsNewRecord,
 				}
 
-				return RecordAuthResponse(api.app, e.HttpContext, e.Record, meta)
+				return api.app.OnRecordAfterAuthWithOAuth2Request().Trigger(event, func(e *core.RecordAuthWithOAuth2Event) error {
+					return RecordAuthResponse(api.app, e.HttpContext, e.Record, meta)
+				})
 			})
 		}
 	})
-
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterAuthWithOAuth2Request().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	}
 
 	return submitErr
 }
@@ -291,16 +304,12 @@ func (api *recordAuthApi) authWithPassword(c echo.Context) error {
 					return NewBadRequestError("Failed to authenticate.", err)
 				}
 
-				return RecordAuthResponse(api.app, e.HttpContext, e.Record, nil)
+				return api.app.OnRecordAfterAuthWithPasswordRequest().Trigger(event, func(e *core.RecordAuthWithPasswordEvent) error {
+					return RecordAuthResponse(api.app, e.HttpContext, e.Record, nil)
+				})
 			})
 		}
 	})
-
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterAuthWithPasswordRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	}
 
 	return submitErr
 }
@@ -336,30 +345,32 @@ func (api *recordAuthApi) requestPasswordReset(c echo.Context) error {
 			return api.app.OnRecordBeforeRequestPasswordResetRequest().Trigger(event, func(e *core.RecordRequestPasswordResetEvent) error {
 				// run in background because we don't need to show the result to the client
 				routine.FireAndForget(func() {
-					if err := next(e.Record); err != nil && api.app.IsDebug() {
-						log.Println(err)
+					if err := next(e.Record); err != nil {
+						api.app.Logger().Debug(
+							"Failed to send password reset email",
+							slog.String("error", err.Error()),
+						)
 					}
 				})
 
-				return e.HttpContext.NoContent(http.StatusNoContent)
+				return api.app.OnRecordAfterRequestPasswordResetRequest().Trigger(event, func(e *core.RecordRequestPasswordResetEvent) error {
+					if e.HttpContext.Response().Committed {
+						return nil
+					}
+
+					return e.HttpContext.NoContent(http.StatusNoContent)
+				})
 			})
 		}
 	})
 
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterRequestPasswordResetRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	} else if api.app.IsDebug() {
-		log.Println(submitErr)
-	}
-
-	// don't return the response error to prevent emails enumeration
+	// eagerly write 204 response and skip submit errors
+	// as a measure against emails enumeration
 	if !c.Response().Committed {
 		c.NoContent(http.StatusNoContent)
 	}
 
-	return nil
+	return submitErr
 }
 
 func (api *recordAuthApi) confirmPasswordReset(c echo.Context) error {
@@ -386,16 +397,16 @@ func (api *recordAuthApi) confirmPasswordReset(c echo.Context) error {
 					return NewBadRequestError("Failed to set new password.", err)
 				}
 
-				return e.HttpContext.NoContent(http.StatusNoContent)
+				return api.app.OnRecordAfterConfirmPasswordResetRequest().Trigger(event, func(e *core.RecordConfirmPasswordResetEvent) error {
+					if e.HttpContext.Response().Committed {
+						return nil
+					}
+
+					return e.HttpContext.NoContent(http.StatusNoContent)
+				})
 			})
 		}
 	})
-
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterConfirmPasswordResetRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	}
 
 	return submitErr
 }
@@ -426,30 +437,32 @@ func (api *recordAuthApi) requestVerification(c echo.Context) error {
 			return api.app.OnRecordBeforeRequestVerificationRequest().Trigger(event, func(e *core.RecordRequestVerificationEvent) error {
 				// run in background because we don't need to show the result to the client
 				routine.FireAndForget(func() {
-					if err := next(e.Record); err != nil && api.app.IsDebug() {
-						log.Println(err)
+					if err := next(e.Record); err != nil {
+						api.app.Logger().Debug(
+							"Failed to send verification email",
+							slog.String("error", err.Error()),
+						)
 					}
 				})
 
-				return e.HttpContext.NoContent(http.StatusNoContent)
+				return api.app.OnRecordAfterRequestVerificationRequest().Trigger(event, func(e *core.RecordRequestVerificationEvent) error {
+					if e.HttpContext.Response().Committed {
+						return nil
+					}
+
+					return e.HttpContext.NoContent(http.StatusNoContent)
+				})
 			})
 		}
 	})
 
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterRequestVerificationRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	} else if api.app.IsDebug() {
-		log.Println(submitErr)
-	}
-
-	// don't return the response error to prevent emails enumeration
+	// eagerly write 204 response and skip submit errors
+	// as a measure against users enumeration
 	if !c.Response().Committed {
 		c.NoContent(http.StatusNoContent)
 	}
 
-	return nil
+	return submitErr
 }
 
 func (api *recordAuthApi) confirmVerification(c echo.Context) error {
@@ -476,16 +489,16 @@ func (api *recordAuthApi) confirmVerification(c echo.Context) error {
 					return NewBadRequestError("An error occurred while submitting the form.", err)
 				}
 
-				return e.HttpContext.NoContent(http.StatusNoContent)
+				return api.app.OnRecordAfterConfirmVerificationRequest().Trigger(event, func(e *core.RecordConfirmVerificationEvent) error {
+					if e.HttpContext.Response().Committed {
+						return nil
+					}
+
+					return e.HttpContext.NoContent(http.StatusNoContent)
+				})
 			})
 		}
 	})
-
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterConfirmVerificationRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	}
 
 	return submitErr
 }
@@ -511,23 +524,23 @@ func (api *recordAuthApi) requestEmailChange(c echo.Context) error {
 	event.Collection = collection
 	event.Record = record
 
-	submitErr := form.Submit(func(next forms.InterceptorNextFunc[*models.Record]) forms.InterceptorNextFunc[*models.Record] {
+	return form.Submit(func(next forms.InterceptorNextFunc[*models.Record]) forms.InterceptorNextFunc[*models.Record] {
 		return func(record *models.Record) error {
 			return api.app.OnRecordBeforeRequestEmailChangeRequest().Trigger(event, func(e *core.RecordRequestEmailChangeEvent) error {
 				if err := next(e.Record); err != nil {
 					return NewBadRequestError("Failed to request email change.", err)
 				}
 
-				return e.HttpContext.NoContent(http.StatusNoContent)
+				return api.app.OnRecordAfterRequestEmailChangeRequest().Trigger(event, func(e *core.RecordRequestEmailChangeEvent) error {
+					if e.HttpContext.Response().Committed {
+						return nil
+					}
+
+					return e.HttpContext.NoContent(http.StatusNoContent)
+				})
 			})
 		}
 	})
-
-	if submitErr == nil {
-		api.app.OnRecordAfterRequestEmailChangeRequest().Trigger(event)
-	}
-
-	return submitErr
 }
 
 func (api *recordAuthApi) confirmEmailChange(c echo.Context) error {
@@ -554,16 +567,16 @@ func (api *recordAuthApi) confirmEmailChange(c echo.Context) error {
 					return NewBadRequestError("Failed to confirm email change.", err)
 				}
 
-				return e.HttpContext.NoContent(http.StatusNoContent)
+				return api.app.OnRecordAfterConfirmEmailChangeRequest().Trigger(event, func(e *core.RecordConfirmEmailChangeEvent) error {
+					if e.HttpContext.Response().Committed {
+						return nil
+					}
+
+					return e.HttpContext.NoContent(http.StatusNoContent)
+				})
 			})
 		}
 	})
-
-	if submitErr == nil {
-		if err := api.app.OnRecordAfterConfirmEmailChangeRequest().Trigger(event); err != nil && api.app.IsDebug() {
-			log.Println(err)
-		}
-	}
 
 	return submitErr
 }
@@ -628,54 +641,72 @@ func (api *recordAuthApi) unlinkExternalAuth(c echo.Context) error {
 	event.Record = record
 	event.ExternalAuth = externalAuth
 
-	handlerErr := api.app.OnRecordBeforeUnlinkExternalAuthRequest().Trigger(event, func(e *core.RecordUnlinkExternalAuthEvent) error {
+	return api.app.OnRecordBeforeUnlinkExternalAuthRequest().Trigger(event, func(e *core.RecordUnlinkExternalAuthEvent) error {
 		if err := api.app.Dao().DeleteExternalAuth(externalAuth); err != nil {
 			return NewBadRequestError("Cannot unlink the external auth provider.", err)
 		}
 
-		return e.HttpContext.NoContent(http.StatusNoContent)
+		return api.app.OnRecordAfterUnlinkExternalAuthRequest().Trigger(event, func(e *core.RecordUnlinkExternalAuthEvent) error {
+			if e.HttpContext.Response().Committed {
+				return nil
+			}
+
+			return e.HttpContext.NoContent(http.StatusNoContent)
+		})
 	})
-
-	if handlerErr == nil {
-		api.app.OnRecordAfterUnlinkExternalAuthRequest().Trigger(event)
-	}
-
-	return handlerErr
 }
 
 // -------------------------------------------------------------------
 
-const oauth2SubscriptionTopic = "@oauth2"
+const (
+	oauth2SubscriptionTopic   string = "@oauth2"
+	oauth2RedirectFailurePath string = "../_/#/auth/oauth2-redirect-failure"
+	oauth2RedirectSuccessPath string = "../_/#/auth/oauth2-redirect-success"
+)
+
+type oauth2EventMessage struct {
+	State string `json:"state"`
+	Code  string `json:"code"`
+	Error string `json:"error,omitempty"`
+}
 
 func (api *recordAuthApi) oauth2SubscriptionRedirect(c echo.Context) error {
 	state := c.QueryParam("state")
-	code := c.QueryParam("code")
-
-	if code == "" || state == "" {
-		return NewBadRequestError("Invalid OAuth2 redirect parameters.", nil)
+	if state == "" {
+		api.app.Logger().Debug("Missing OAuth2 state parameter")
+		return c.Redirect(http.StatusTemporaryRedirect, oauth2RedirectFailurePath)
 	}
 
 	client, err := api.app.SubscriptionsBroker().ClientById(state)
 	if err != nil || client.IsDiscarded() || !client.HasSubscription(oauth2SubscriptionTopic) {
-		return NewNotFoundError("Missing or invalid OAuth2 subscription client.", err)
+		api.app.Logger().Debug("Missing or invalid OAuth2 subscription client", "error", err, "clientId", state)
+		return c.Redirect(http.StatusTemporaryRedirect, oauth2RedirectFailurePath)
 	}
+	defer client.Unsubscribe(oauth2SubscriptionTopic)
 
-	data := map[string]string{
-		"state": state,
-		"code":  code,
+	data := oauth2EventMessage{
+		State: state,
+		Code:  c.QueryParam("code"),
+		Error: c.QueryParam("error"),
 	}
 
 	encodedData, err := json.Marshal(data)
 	if err != nil {
-		return NewBadRequestError("Failed to marshalize OAuth2 redirect data.", err)
+		api.app.Logger().Debug("Failed to marshalize OAuth2 redirect data", "error", err)
+		return c.Redirect(http.StatusTemporaryRedirect, oauth2RedirectFailurePath)
 	}
 
 	msg := subscriptions.Message{
 		Name: oauth2SubscriptionTopic,
-		Data: string(encodedData),
+		Data: encodedData,
 	}
 
-	client.Channel() <- msg
+	client.Send(msg)
 
-	return c.Redirect(http.StatusTemporaryRedirect, "../_/#/auth/oauth2-redirect")
+	if data.Error != "" || data.Code == "" {
+		api.app.Logger().Debug("Failed OAuth2 redirect due to an error or missing code parameter", "error", data.Error, "clientId", data.State)
+		return c.Redirect(http.StatusTemporaryRedirect, oauth2RedirectFailurePath)
+	}
+
+	return c.Redirect(http.StatusTemporaryRedirect, oauth2RedirectSuccessPath)
 }

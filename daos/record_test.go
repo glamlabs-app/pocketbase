@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -19,7 +18,9 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
-func TestRecordQuery(t *testing.T) {
+func TestRecordQueryWithDifferentCollectionValues(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -28,15 +29,39 @@ func TestRecordQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expected := fmt.Sprintf("SELECT `%s`.* FROM `%s`", collection.Name, collection.Name)
+	scenarios := []struct {
+		name          any
+		collection    any
+		expectedTotal int
+		expectError   bool
+	}{
+		{"with nil value", nil, 0, true},
+		{"with invalid or missing collection id/name", "missing", 0, true},
+		{"with pointer model", collection, 3, false},
+		{"with value model", *collection, 3, false},
+		{"with name", "demo1", 3, false},
+		{"with id", "wsmn24bux7wo113", 3, false},
+	}
 
-	sql := app.Dao().RecordQuery(collection).Build().SQL()
-	if sql != expected {
-		t.Errorf("Expected sql %s, got %s", expected, sql)
+	for _, s := range scenarios {
+		var records []*models.Record
+		err := app.Dao().RecordQuery(s.collection).All(&records)
+
+		hasErr := err != nil
+		if hasErr != s.expectError {
+			t.Errorf("[%s] Expected hasError %v, got %v", s.name, s.expectError, hasErr)
+			continue
+		}
+
+		if total := len(records); total != s.expectedTotal {
+			t.Errorf("[%s] Expected %d records, got %d", s.name, s.expectedTotal, total)
+		}
 	}
 }
 
 func TestRecordQueryOneWithRecord(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -61,6 +86,8 @@ func TestRecordQueryOneWithRecord(t *testing.T) {
 }
 
 func TestRecordQueryAllWithRecordsSlices(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -122,6 +149,8 @@ func TestRecordQueryAllWithRecordsSlices(t *testing.T) {
 }
 
 func TestFindRecordById(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -182,6 +211,8 @@ func TestFindRecordById(t *testing.T) {
 }
 
 func TestFindRecordsByIds(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -273,6 +304,8 @@ func TestFindRecordsByIds(t *testing.T) {
 }
 
 func TestFindRecordsByExpr(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -343,6 +376,8 @@ func TestFindRecordsByExpr(t *testing.T) {
 }
 
 func TestFindFirstRecordByData(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -405,7 +440,415 @@ func TestFindFirstRecordByData(t *testing.T) {
 	}
 }
 
+func TestFindRecordsByFilter(t *testing.T) {
+	t.Parallel()
+
+	app, _ := tests.NewTestApp()
+	defer app.Cleanup()
+
+	scenarios := []struct {
+		name               string
+		collectionIdOrName string
+		filter             string
+		sort               string
+		limit              int
+		offset             int
+		params             []dbx.Params
+		expectError        bool
+		expectRecordIds    []string
+	}{
+		{
+			"missing collection",
+			"missing",
+			"id != ''",
+			"",
+			0,
+			0,
+			nil,
+			true,
+			nil,
+		},
+		{
+			"missing filter",
+			"demo2",
+			"",
+			"",
+			0,
+			0,
+			nil,
+			true,
+			nil,
+		},
+		{
+			"invalid filter",
+			"demo2",
+			"someMissingField > 1",
+			"",
+			0,
+			0,
+			nil,
+			true,
+			nil,
+		},
+		{
+			"simple filter",
+			"demo2",
+			"id != ''",
+			"",
+			0,
+			0,
+			nil,
+			false,
+			[]string{
+				"llvuca81nly1qls",
+				"achvryl401bhse3",
+				"0yxhwia2amd8gec",
+			},
+		},
+		{
+			"multi-condition filter with sort",
+			"demo2",
+			"id != '' && active=true",
+			"-created,title",
+			-1, // should behave the same as 0
+			0,
+			nil,
+			false,
+			[]string{
+				"0yxhwia2amd8gec",
+				"achvryl401bhse3",
+			},
+		},
+		{
+			"with limit and offset",
+			"demo2",
+			"id != ''",
+			"title",
+			2,
+			1,
+			nil,
+			false,
+			[]string{
+				"achvryl401bhse3",
+				"0yxhwia2amd8gec",
+			},
+		},
+		{
+			"with placeholder params",
+			"demo2",
+			"active = {:active}",
+			"",
+			10,
+			0,
+			[]dbx.Params{{"active": false}},
+			false,
+			[]string{
+				"llvuca81nly1qls",
+			},
+		},
+		{
+			"with json filter and sort",
+			"demo4",
+			"json_object != null && json_object.a.b = 'test'",
+			"-json_object.a",
+			10,
+			0,
+			[]dbx.Params{{"active": false}},
+			false,
+			[]string{
+				"i9naidtvr6qsgb4",
+			},
+		},
+	}
+
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			records, err := app.Dao().FindRecordsByFilter(
+				s.collectionIdOrName,
+				s.filter,
+				s.sort,
+				s.limit,
+				s.offset,
+				s.params...,
+			)
+
+			hasErr := err != nil
+			if hasErr != s.expectError {
+				t.Fatalf("[%s] Expected hasErr to be %v, got %v (%v)", s.name, s.expectError, hasErr, err)
+			}
+
+			if hasErr {
+				return
+			}
+
+			if len(records) != len(s.expectRecordIds) {
+				t.Fatalf("[%s] Expected %d records, got %d", s.name, len(s.expectRecordIds), len(records))
+			}
+
+			for i, id := range s.expectRecordIds {
+				if id != records[i].Id {
+					t.Fatalf("[%s] Expected record with id %q, got %q at index %d", s.name, id, records[i].Id, i)
+				}
+			}
+		})
+	}
+}
+
+func TestFindFirstRecordByFilter(t *testing.T) {
+	t.Parallel()
+
+	app, _ := tests.NewTestApp()
+	defer app.Cleanup()
+
+	scenarios := []struct {
+		name               string
+		collectionIdOrName string
+		filter             string
+		params             []dbx.Params
+		expectError        bool
+		expectRecordId     string
+	}{
+		{
+			"missing collection",
+			"missing",
+			"id != ''",
+			nil,
+			true,
+			"",
+		},
+		{
+			"missing filter",
+			"demo2",
+			"",
+			nil,
+			true,
+			"",
+		},
+		{
+			"invalid filter",
+			"demo2",
+			"someMissingField > 1",
+			nil,
+			true,
+			"",
+		},
+		{
+			"valid filter but no matches",
+			"demo2",
+			"id = 'test'",
+			nil,
+			true,
+			"",
+		},
+		{
+			"valid filter and multiple matches",
+			"demo2",
+			"id != ''",
+			nil,
+			false,
+			"llvuca81nly1qls",
+		},
+		{
+			"with placeholder params",
+			"demo2",
+			"active = {:active}",
+			[]dbx.Params{{"active": false}},
+			false,
+			"llvuca81nly1qls",
+		},
+	}
+
+	for _, s := range scenarios {
+		record, err := app.Dao().FindFirstRecordByFilter(s.collectionIdOrName, s.filter, s.params...)
+
+		hasErr := err != nil
+		if hasErr != s.expectError {
+			t.Errorf("[%s] Expected hasErr to be %v, got %v (%v)", s.name, s.expectError, hasErr, err)
+			continue
+		}
+
+		if hasErr {
+			continue
+		}
+
+		if record.Id != s.expectRecordId {
+			t.Errorf("[%s] Expected record with id %q, got %q", s.name, s.expectRecordId, record.Id)
+		}
+	}
+}
+
+func TestCanAccessRecord(t *testing.T) {
+	t.Parallel()
+
+	app, _ := tests.NewTestApp()
+	defer app.Cleanup()
+
+	admin, err := app.Dao().FindAdminByEmail("test@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	authRecord, err := app.Dao().FindAuthRecordByEmail("users", "test@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := app.Dao().FindRecordById("demo1", "imy661ixudk5izi")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scenarios := []struct {
+		name        string
+		record      *models.Record
+		requestInfo *models.RequestInfo
+		rule        *string
+		expected    bool
+		expectError bool
+	}{
+		{
+			"as admin with nil rule",
+			record,
+			&models.RequestInfo{
+				Admin: admin,
+			},
+			nil,
+			true,
+			false,
+		},
+		{
+			"as admin with non-empty rule",
+			record,
+			&models.RequestInfo{
+				Admin: admin,
+			},
+			types.Pointer("id = ''"), // the filter rule should be ignored
+			true,
+			false,
+		},
+		{
+			"as admin with invalid rule",
+			record,
+			&models.RequestInfo{
+				Admin: admin,
+			},
+			types.Pointer("id ?!@ 1"), // the filter rule should be ignored
+			true,
+			false,
+		},
+		{
+			"as guest with nil rule",
+			record,
+			&models.RequestInfo{},
+			nil,
+			false,
+			false,
+		},
+		{
+			"as guest with empty rule",
+			record,
+			&models.RequestInfo{},
+			types.Pointer(""),
+			true,
+			false,
+		},
+		{
+			"as guest with invalid rule",
+			record,
+			&models.RequestInfo{},
+			types.Pointer("id ?!@ 1"),
+			false,
+			true,
+		},
+		{
+			"as guest with mismatched rule",
+			record,
+			&models.RequestInfo{},
+			types.Pointer("@request.auth.id != ''"),
+			false,
+			false,
+		},
+		{
+			"as guest with matched rule",
+			record,
+			&models.RequestInfo{
+				Data: map[string]any{"test": 1},
+			},
+			types.Pointer("@request.auth.id != '' || @request.data.test = 1"),
+			true,
+			false,
+		},
+		{
+			"as auth record with nil rule",
+			record,
+			&models.RequestInfo{
+				AuthRecord: authRecord,
+			},
+			nil,
+			false,
+			false,
+		},
+		{
+			"as auth record with empty rule",
+			record,
+			&models.RequestInfo{
+				AuthRecord: authRecord,
+			},
+			types.Pointer(""),
+			true,
+			false,
+		},
+		{
+			"as auth record with invalid rule",
+			record,
+			&models.RequestInfo{
+				AuthRecord: authRecord,
+			},
+			types.Pointer("id ?!@ 1"),
+			false,
+			true,
+		},
+		{
+			"as auth record with mismatched rule",
+			record,
+			&models.RequestInfo{
+				AuthRecord: authRecord,
+				Data:       map[string]any{"test": 1},
+			},
+			types.Pointer("@request.auth.id != '' && @request.data.test > 1"),
+			false,
+			false,
+		},
+		{
+			"as auth record with matched rule",
+			record,
+			&models.RequestInfo{
+				AuthRecord: authRecord,
+				Data:       map[string]any{"test": 2},
+			},
+			types.Pointer("@request.auth.id != '' && @request.data.test > 1"),
+			true,
+			false,
+		},
+	}
+
+	for _, s := range scenarios {
+		result, err := app.Dao().CanAccessRecord(s.record, s.requestInfo, s.rule)
+
+		if result != s.expected {
+			t.Errorf("[%s] Expected %v, got %v", s.name, s.expected, result)
+		}
+
+		hasErr := err != nil
+		if hasErr != s.expectError {
+			t.Errorf("[%s] Expected hasErr %v, got %v (%v)", s.name, s.expectError, hasErr, err)
+		}
+	}
+}
+
 func TestIsRecordValueUnique(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -455,6 +898,8 @@ func TestIsRecordValueUnique(t *testing.T) {
 }
 
 func TestFindAuthRecordByToken(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -517,6 +962,8 @@ func TestFindAuthRecordByToken(t *testing.T) {
 }
 
 func TestFindAuthRecordByEmail(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -548,6 +995,8 @@ func TestFindAuthRecordByEmail(t *testing.T) {
 }
 
 func TestFindAuthRecordByUsername(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -580,6 +1029,8 @@ func TestFindAuthRecordByUsername(t *testing.T) {
 }
 
 func TestSuggestUniqueAuthRecordUsername(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -617,6 +1068,8 @@ func TestSuggestUniqueAuthRecordUsername(t *testing.T) {
 }
 
 func TestSaveRecord(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -650,6 +1103,8 @@ func TestSaveRecord(t *testing.T) {
 }
 
 func TestSaveRecordWithIdFromOtherCollection(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -682,6 +1137,8 @@ func TestSaveRecordWithIdFromOtherCollection(t *testing.T) {
 }
 
 func TestDeleteRecord(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -748,17 +1205,19 @@ func TestDeleteRecord(t *testing.T) {
 	}
 	// ensure that the json rel fields were prefixed
 	joinedQueries := strings.Join(calledQueries, " ")
-	expectedRelManyPart := "`demo1` INNER JOIN json_each(CASE WHEN json_valid([[demo1.rel_many]]) THEN [[demo1.rel_many]] ELSE json_array([[demo1.rel_many]]) END)"
+	expectedRelManyPart := "SELECT `demo1`.* FROM `demo1` WHERE EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid([[demo1.rel_many]]) THEN [[demo1.rel_many]] ELSE json_array([[demo1.rel_many]]) END) {{__je__}} WHERE [[__je__.value]]='"
 	if !strings.Contains(joinedQueries, expectedRelManyPart) {
 		t.Fatalf("(rec3) Expected the cascade delete to call the query \n%v, got \n%v", expectedRelManyPart, calledQueries)
 	}
-	expectedRelOnePart := "SELECT DISTINCT `demo1`.* FROM `demo1` WHERE (`demo1`.`rel_one`="
+	expectedRelOnePart := "SELECT `demo1`.* FROM `demo1` WHERE (`demo1`.`rel_one`='"
 	if !strings.Contains(joinedQueries, expectedRelOnePart) {
 		t.Fatalf("(rec3) Expected the cascade delete to call the query \n%v, got \n%v", expectedRelOnePart, calledQueries)
 	}
 }
 
 func TestDeleteRecordBatchProcessing(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 

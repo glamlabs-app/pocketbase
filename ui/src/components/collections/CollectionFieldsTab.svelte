@@ -1,5 +1,4 @@
 <script>
-    import { Collection, SchemaField } from "pocketbase";
     import { setErrors } from "@/stores/errors";
     import CommonHelper from "@/utils/CommonHelper";
     import IndexesList from "@/components/collections/IndexesList.svelte";
@@ -17,7 +16,7 @@
     import SchemaFieldRelation from "@/components/collections/schema/SchemaFieldRelation.svelte";
     import Draggable from "@/components/base/Draggable.svelte";
 
-    export let collection = new Collection();
+    export let collection;
 
     const fieldComponents = {
         text: SchemaFieldText,
@@ -34,7 +33,6 @@
     };
 
     $: if (typeof collection.schema === "undefined") {
-        collection = collection || new Collection();
         collection.schema = [];
     }
 
@@ -47,8 +45,25 @@
         }
     }
 
+    function duplicateField(fieldIndex) {
+        const field = collection.schema[fieldIndex];
+        if (!field) {
+            return; // nothing to duplicate
+        }
+
+        field.onMountSelect = false;
+
+        const clone = structuredClone(field);
+        clone.id = "";
+        clone.name = getUniqueFieldName(clone.name + "_copy");
+        clone.onMountSelect = true;
+
+        collection.schema.splice(fieldIndex + 1, 0, clone);
+        collection.schema = collection.schema;
+    }
+
     function newField(fieldType = "text") {
-        const field = new SchemaField({
+        const field = CommonHelper.initSchemaField({
             name: getUniqueFieldName(),
             type: fieldType,
         });
@@ -59,18 +74,25 @@
         collection.schema = collection.schema;
     }
 
-    function getUniqueFieldName(base = "field") {
-        let counter = "";
+    function getUniqueFieldName(name = "field") {
+        let result = name;
+        let counter = 2;
 
-        while (hasFieldWithName(base + counter)) {
-            ++counter;
+        let suffix = name.match(/\d+$/)?.[0] || ""; // extract numeric suffix
+
+        // name without the suffix
+        let base = suffix ? name.substring(0, name.length - suffix.length) : name;
+
+        while (hasFieldWithName(result)) {
+            result = base + ((suffix << 0) + counter);
+            counter++;
         }
 
-        return base + counter;
+        return result;
     }
 
     function hasFieldWithName(name) {
-        return !!collection.schema.find((field) => field.name === name);
+        return !!collection?.schema?.find((field) => field.name === name);
     }
 
     function getSchemaFieldIndex(field) {
@@ -82,9 +104,14 @@
             return;
         }
 
+        // field with the old name exists so there is no need to rename index columns
+        if (!!collection?.schema?.find((f) => f.name == oldName && !f.toDelete)) {
+            return;
+        }
+
         // update indexes on renamed fields
         collection.indexes = collection.indexes.map((idx) =>
-            CommonHelper.replaceIndexColumn(idx, oldName, newName)
+            CommonHelper.replaceIndexColumn(idx, oldName, newName),
         );
     }
 </script>
@@ -95,7 +122,7 @@
         <code class="txt-sm">id</code> ,
         <code class="txt-sm">created</code> ,
         <code class="txt-sm">updated</code>
-        {#if collection.$isAuth}
+        {#if collection.type === "auth"}
             ,
             <code class="txt-sm">username</code> ,
             <code class="txt-sm">email</code> ,
@@ -135,6 +162,7 @@
                 key={getSchemaFieldIndex(field)}
                 bind:field
                 on:remove={() => removeField(i)}
+                on:duplicate={() => duplicateField(i)}
                 on:rename={(e) => replaceIndexesColumn(e.detail.oldName, e.detail.newName)}
             />
         </Draggable>

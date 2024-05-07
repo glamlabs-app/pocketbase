@@ -7,6 +7,8 @@ import (
 )
 
 func TestCronNew(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
 	expectedInterval := 1 * time.Minute
@@ -29,6 +31,8 @@ func TestCronNew(t *testing.T) {
 }
 
 func TestCronSetInterval(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
 	interval := 2 * time.Minute
@@ -41,6 +45,8 @@ func TestCronSetInterval(t *testing.T) {
 }
 
 func TestCronSetTimezone(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
 	timezone, _ := time.LoadLocation("Asia/Tokyo")
@@ -53,6 +59,8 @@ func TestCronSetTimezone(t *testing.T) {
 }
 
 func TestCronAddAndRemove(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
 	if err := c.Add("test0", "* * * * *", nil); err == nil {
@@ -126,6 +134,8 @@ func TestCronAddAndRemove(t *testing.T) {
 }
 
 func TestCronMustAdd(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
 	defer func() {
@@ -144,6 +154,8 @@ func TestCronMustAdd(t *testing.T) {
 }
 
 func TestCronRemoveAll(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
 	if err := c.Add("test1", "* * * * *", func() {}); err != nil {
@@ -169,13 +181,42 @@ func TestCronRemoveAll(t *testing.T) {
 	}
 }
 
-func TestCronStartStop(t *testing.T) {
+func TestCronTotal(t *testing.T) {
+	t.Parallel()
+
 	c := New()
 
-	c.SetInterval(1 * time.Second)
+	if v := c.Total(); v != 0 {
+		t.Fatalf("Expected 0 jobs, got %v", v)
+	}
+
+	if err := c.Add("test1", "* * * * *", func() {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Add("test2", "* * * * *", func() {}); err != nil {
+		t.Fatal(err)
+	}
+
+	// overwrite
+	if err := c.Add("test1", "* * * * *", func() {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if v := c.Total(); v != 2 {
+		t.Fatalf("Expected 2 jobs, got %v", v)
+	}
+}
+
+func TestCronStartStop(t *testing.T) {
+	t.Parallel()
 
 	test1 := 0
 	test2 := 0
+
+	c := New()
+
+	c.SetInterval(500 * time.Millisecond)
 
 	c.Add("test1", "* * * * *", func() {
 		test1++
@@ -185,13 +226,13 @@ func TestCronStartStop(t *testing.T) {
 		test2++
 	})
 
-	expectedCalls := 3
+	expectedCalls := 2
 
 	// call twice Start to check if the previous ticker will be reseted
 	c.Start()
 	c.Start()
 
-	time.Sleep(3250 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	// call twice Stop to ensure that the second stop is no-op
 	c.Stop()
@@ -204,12 +245,14 @@ func TestCronStartStop(t *testing.T) {
 		t.Fatalf("Expected %d test2, got %d", expectedCalls, test2)
 	}
 
-	// resume for ~5 seconds
+	// resume for 2 seconds
 	c.Start()
-	time.Sleep(5250 * time.Millisecond)
+
+	time.Sleep(2 * time.Second)
+
 	c.Stop()
 
-	expectedCalls += 5
+	expectedCalls += 4
 
 	if test1 != expectedCalls {
 		t.Fatalf("Expected %d test1, got %d", expectedCalls, test1)

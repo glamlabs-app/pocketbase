@@ -6,16 +6,20 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
 
 func TestSettingsList(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -75,6 +79,13 @@ func TestSettingsList(t *testing.T) {
 				`"oidc2Auth":{`,
 				`"oidc3Auth":{`,
 				`"appleAuth":{`,
+				`"instagramAuth":{`,
+				`"vkAuth":{`,
+				`"yandexAuth":{`,
+				`"patreonAuth":{`,
+				`"mailcowAuth":{`,
+				`"bitbucketAuth":{`,
+				`"planningcenterAuth":{`,
 				`"secret":"******"`,
 				`"clientSecret":"******"`,
 			},
@@ -90,6 +101,8 @@ func TestSettingsList(t *testing.T) {
 }
 
 func TestSettingsSet(t *testing.T) {
+	t.Parallel()
+
 	validData := `{"meta":{"appName":"update_test"}}`
 
 	scenarios := []tests.ApiScenario{
@@ -153,6 +166,13 @@ func TestSettingsSet(t *testing.T) {
 				`"oidc2Auth":{`,
 				`"oidc3Auth":{`,
 				`"appleAuth":{`,
+				`"instagramAuth":{`,
+				`"vkAuth":{`,
+				`"yandexAuth":{`,
+				`"patreonAuth":{`,
+				`"mailcowAuth":{`,
+				`"bitbucketAuth":{`,
+				`"planningcenterAuth":{`,
 				`"secret":"******"`,
 				`"clientSecret":"******"`,
 				`"appName":"acme_test"`,
@@ -220,10 +240,39 @@ func TestSettingsSet(t *testing.T) {
 				`"oidc2Auth":{`,
 				`"oidc3Auth":{`,
 				`"appleAuth":{`,
+				`"instagramAuth":{`,
+				`"vkAuth":{`,
+				`"yandexAuth":{`,
+				`"patreonAuth":{`,
+				`"mailcowAuth":{`,
+				`"bitbucketAuth":{`,
+				`"planningcenterAuth":{`,
 				`"secret":"******"`,
 				`"clientSecret":"******"`,
 				`"appName":"update_test"`,
 			},
+			ExpectedEvents: map[string]int{
+				"OnModelBeforeUpdate":           1,
+				"OnModelAfterUpdate":            1,
+				"OnSettingsBeforeUpdateRequest": 1,
+				"OnSettingsAfterUpdateRequest":  1,
+			},
+		},
+		{
+			Name:   "OnSettingsAfterUpdateRequest error response",
+			Method: http.MethodPatch,
+			Url:    "/api/settings",
+			Body:   strings.NewReader(validData),
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnSettingsAfterUpdateRequest().Add(func(e *core.SettingsUpdateEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
 			ExpectedEvents: map[string]int{
 				"OnModelBeforeUpdate":           1,
 				"OnModelAfterUpdate":            1,
@@ -239,6 +288,8 @@ func TestSettingsSet(t *testing.T) {
 }
 
 func TestSettingsTestS3(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -305,6 +356,8 @@ func TestSettingsTestS3(t *testing.T) {
 }
 
 func TestSettingsTestEmail(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:   "unauthorized",
@@ -367,7 +420,7 @@ func TestSettingsTestEmail(t *testing.T) {
 			RequestHeaders: map[string]string{
 				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				if app.TestMailer.TotalSend != 1 {
 					t.Fatalf("[verification] Expected 1 sent email, got %d", app.TestMailer.TotalSend)
 				}
@@ -402,7 +455,7 @@ func TestSettingsTestEmail(t *testing.T) {
 			RequestHeaders: map[string]string{
 				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				if app.TestMailer.TotalSend != 1 {
 					t.Fatalf("[password-reset] Expected 1 sent email, got %d", app.TestMailer.TotalSend)
 				}
@@ -437,7 +490,7 @@ func TestSettingsTestEmail(t *testing.T) {
 			RequestHeaders: map[string]string{
 				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				if app.TestMailer.TotalSend != 1 {
 					t.Fatalf("[email-change] Expected 1 sent email, got %d", app.TestMailer.TotalSend)
 				}
@@ -469,6 +522,8 @@ func TestSettingsTestEmail(t *testing.T) {
 }
 
 func TestGenerateAppleClientSecret(t *testing.T) {
+	t.Parallel()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

@@ -53,6 +53,7 @@
         closeBracketsKeymap,
     } from "@codemirror/autocomplete";
     import { html as htmlLang } from "@codemirror/lang-html";
+    import { json as jsonLang } from "@codemirror/lang-json";
     import { sql, SQLDialect } from "@codemirror/lang-sql";
     import { javascript as javascriptLang } from "@codemirror/lang-javascript";
     // ---
@@ -160,6 +161,8 @@
         switch (language) {
             case "html":
                 return htmlLang();
+            case "json":
+                return jsonLang();
             case "sql-create-index":
                 return sql({
                     // lightweight sql dialect with mostly SELECT statements keywords
@@ -185,7 +188,7 @@
                     dialect: SQLDialect.define({
                         keywords:
                             "select distinct from where having group by order limit offset join left right inner with like not in match asc desc regexp isnull notnull glob " +
-                            "count avg sum min max current random cast as int real text " +
+                            "count avg sum min max current random cast as int real text bool " +
                             "date time datetime unixepoch strftime coalesce lower upper substr " +
                             "case when then iif if else json_extract json_each json_tree json_array_length json_valid ",
                         operatorChars: "*+-%<>!=&|/~",
@@ -246,7 +249,14 @@
                     editableCompartment.of(EditorView.editable.of(true)),
                     readOnlyCompartment.of(EditorState.readOnly.of(false)),
                     EditorState.transactionFilter.of((tr) => {
-                        return singleLine && tr.newDoc.lines > 1 ? [] : tr;
+                        if (singleLine && tr.newDoc.lines > 1) {
+                            if (!tr.changes?.inserted?.filter((i) => !!i.text.find((t) => t))?.length) {
+                                return []; // only empty lines
+                            }
+                            // it is ok to mutate the current transaction as we don't change the doc length
+                            tr.newDoc.text = [tr.newDoc.text.join(" ")];
+                        }
+                        return tr;
                     }),
                     EditorView.updateListener.of((v) => {
                         if (!v.docChanged || disabled) {

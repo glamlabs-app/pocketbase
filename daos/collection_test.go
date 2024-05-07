@@ -16,6 +16,8 @@ import (
 )
 
 func TestCollectionQuery(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -28,6 +30,8 @@ func TestCollectionQuery(t *testing.T) {
 }
 
 func TestFindCollectionsByType(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -63,6 +67,8 @@ func TestFindCollectionsByType(t *testing.T) {
 }
 
 func TestFindCollectionByNameOrId(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -92,6 +98,8 @@ func TestFindCollectionByNameOrId(t *testing.T) {
 }
 
 func TestIsCollectionNameUnique(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -116,6 +124,8 @@ func TestIsCollectionNameUnique(t *testing.T) {
 }
 
 func TestFindCollectionReferences(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -143,9 +153,11 @@ func TestFindCollectionReferences(t *testing.T) {
 		"rel_one_no_cascade",
 		"rel_one_no_cascade_required",
 		"rel_one_cascade",
+		"rel_one_unique",
 		"rel_many_no_cascade",
 		"rel_many_no_cascade_required",
 		"rel_many_cascade",
+		"rel_many_unique",
 	}
 
 	for col, fields := range result {
@@ -164,6 +176,8 @@ func TestFindCollectionReferences(t *testing.T) {
 }
 
 func TestDeleteCollection(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -210,11 +224,12 @@ func TestDeleteCollection(t *testing.T) {
 		{colUnsaved, true},
 		{colReferenced, true},
 		{colSystem, true},
+		{colBase, true},  // depend on view1, view2 and view2
 		{colView1, true}, // view2 depend on it
 		{colView2, false},
 		{colView1, false}, // no longer has dependent collections
-		{colBase, false},
-		{colAuth, false}, // should delete also its related external auths
+		{colBase, false},  // no longer has dependent views
+		{colAuth, false},  // should delete also its related external auths
 	}
 
 	for i, s := range scenarios {
@@ -250,6 +265,8 @@ func TestDeleteCollection(t *testing.T) {
 }
 
 func TestSaveCollectionCreate(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -296,6 +313,8 @@ func TestSaveCollectionCreate(t *testing.T) {
 }
 
 func TestSaveCollectionUpdate(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -335,6 +354,8 @@ func TestSaveCollectionUpdate(t *testing.T) {
 
 // indirect update of a field used in view should cause view(s) update
 func TestSaveCollectionIndirectViewsUpdate(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -393,8 +414,121 @@ func TestSaveCollectionIndirectViewsUpdate(t *testing.T) {
 	}
 }
 
+func TestSaveCollectionViewWrapping(t *testing.T) {
+	t.Parallel()
+
+	viewName := "test_wrapping"
+
+	scenarios := []struct {
+		name     string
+		query    string
+		expected string
+	}{
+		{
+			"no wrapping - text field",
+			"select text as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select text as id, bool from demo1)",
+		},
+		{
+			"no wrapping - id field",
+			"select text as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select text as id, bool from demo1)",
+		},
+		{
+			"no wrapping - relation field",
+			"select rel_one as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select rel_one as id, bool from demo1)",
+		},
+		{
+			"no wrapping - select field",
+			"select select_many as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select select_many as id, bool from demo1)",
+		},
+		{
+			"no wrapping - email field",
+			"select email as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select email as id, bool from demo1)",
+		},
+		{
+			"no wrapping - datetime field",
+			"select datetime as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select datetime as id, bool from demo1)",
+		},
+		{
+			"no wrapping - url field",
+			"select url as id, bool from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select url as id, bool from demo1)",
+		},
+		{
+			"wrapping - bool field",
+			"select bool as id, text as txt, url from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (SELECT cast(`id` as text) `id`,`txt`,`url` FROM (select bool as id, text as txt, url from demo1))",
+		},
+		{
+			"wrapping - bool field (different order)",
+			"select text as txt, url, bool as id from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (SELECT `txt`,`url`,cast(`id` as text) `id` FROM (select text as txt, url, bool as id from demo1))",
+		},
+		{
+			"wrapping - json field",
+			"select json as id, text, url from demo1",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (SELECT cast(`id` as text) `id`,`text`,`url` FROM (select json as id, text, url from demo1))",
+		},
+		{
+			"wrapping - numeric id",
+			"select 1 as id",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (SELECT cast(`id` as text) `id` FROM (select 1 as id))",
+		},
+		{
+			"wrapping - expresion",
+			"select ('test') as id",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (SELECT cast(`id` as text) `id` FROM (select ('test') as id))",
+		},
+		{
+			"no wrapping - cast as text",
+			"select cast('test' as text) as id",
+			"CREATE VIEW `test_wrapping` AS SELECT * FROM (select cast('test' as text) as id)",
+		},
+	}
+
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			app, _ := tests.NewTestApp()
+			defer app.Cleanup()
+
+			collection := &models.Collection{
+				Name: viewName,
+				Type: models.CollectionTypeView,
+				Options: types.JsonMap{
+					"query": s.query,
+				},
+			}
+
+			err := app.Dao().SaveCollection(collection)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var sql string
+
+			rowErr := app.Dao().DB().NewQuery("SELECT sql FROM sqlite_master WHERE type='view' AND name={:name}").
+				Bind(dbx.Params{"name": viewName}).
+				Row(&sql)
+			if rowErr != nil {
+				t.Fatalf("Failed to retrieve view sql: %v", rowErr)
+			}
+
+			if sql != s.expected {
+				t.Fatalf("Expected query \n%v, \ngot \n%v", s.expected, sql)
+			}
+		})
+	}
+}
+
 func TestImportCollections(t *testing.T) {
-	totalCollections := 10
+	t.Parallel()
+
+	totalCollections := 11
 
 	scenarios := []struct {
 		name                   string
@@ -624,7 +758,7 @@ func TestImportCollections(t *testing.T) {
 					"demo1":      15,
 					"demo2":      2,
 					"demo3":      2,
-					"demo4":      11,
+					"demo4":      13,
 					"demo5":      6,
 					"new_import": 1,
 				}
@@ -642,37 +776,38 @@ func TestImportCollections(t *testing.T) {
 		},
 	}
 
-	for _, scenario := range scenarios {
-		testApp, _ := tests.NewTestApp()
-		defer testApp.Cleanup()
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			testApp, _ := tests.NewTestApp()
+			defer testApp.Cleanup()
 
-		importedCollections := []*models.Collection{}
+			importedCollections := []*models.Collection{}
 
-		// load data
-		loadErr := json.Unmarshal([]byte(scenario.jsonData), &importedCollections)
-		if loadErr != nil {
-			t.Fatalf("[%s] Failed to load  data: %v", scenario.name, loadErr)
-			continue
-		}
+			// load data
+			loadErr := json.Unmarshal([]byte(s.jsonData), &importedCollections)
+			if loadErr != nil {
+				t.Fatalf("Failed to load  data: %v", loadErr)
+			}
 
-		err := testApp.Dao().ImportCollections(importedCollections, scenario.deleteMissing, scenario.beforeRecordsSync)
+			err := testApp.Dao().ImportCollections(importedCollections, s.deleteMissing, s.beforeRecordsSync)
 
-		hasErr := err != nil
-		if hasErr != scenario.expectError {
-			t.Errorf("[%s] Expected hasErr to be %v, got %v (%v)", scenario.name, scenario.expectError, hasErr, err)
-		}
+			hasErr := err != nil
+			if hasErr != s.expectError {
+				t.Fatalf("Expected hasErr to be %v, got %v (%v)", s.expectError, hasErr, err)
+			}
 
-		// check collections count
-		collections := []*models.Collection{}
-		if err := testApp.Dao().CollectionQuery().All(&collections); err != nil {
-			t.Fatal(err)
-		}
-		if len(collections) != scenario.expectCollectionsCount {
-			t.Errorf("[%s] Expected %d collections, got %d", scenario.name, scenario.expectCollectionsCount, len(collections))
-		}
+			// check collections count
+			collections := []*models.Collection{}
+			if err := testApp.Dao().CollectionQuery().All(&collections); err != nil {
+				t.Fatal(err)
+			}
+			if len(collections) != s.expectCollectionsCount {
+				t.Fatalf("Expected %d collections, got %d", s.expectCollectionsCount, len(collections))
+			}
 
-		if scenario.afterTestFunc != nil {
-			scenario.afterTestFunc(testApp, collections)
-		}
+			if s.afterTestFunc != nil {
+				s.afterTestFunc(testApp, collections)
+			}
+		})
 	}
 }

@@ -14,6 +14,8 @@ import (
 )
 
 func TestSyncRecordTableSchema(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -132,6 +134,8 @@ func TestSyncRecordTableSchema(t *testing.T) {
 }
 
 func TestSingleVsMultipleValuesNormalization(t *testing.T) {
+	t.Parallel()
+
 	app, _ := tests.NewTestApp()
 	defer app.Cleanup()
 
@@ -171,89 +175,149 @@ func TestSingleVsMultipleValuesNormalization(t *testing.T) {
 		opt := relManyField.Options.(*schema.RelationOptions)
 		opt.MaxSelect = types.Pointer(1)
 	}
+	{
+		// new multivaluer field to check whether the array normalization
+		// will be applied for already inserted data
+		collection.Schema.AddField(&schema.SchemaField{
+			Name: "new_multiple",
+			Type: schema.FieldTypeSelect,
+			Options: &schema.SelectOptions{
+				Values:    []string{"a", "b", "c"},
+				MaxSelect: 3,
+			},
+		})
+	}
 
 	if err := app.Dao().SaveCollection(collection); err != nil {
 		t.Fatal(err)
 	}
 
-	type expectation struct {
-		SelectOne  string `db:"select_one"`
-		SelectMany string `db:"select_many"`
-		FileOne    string `db:"file_one"`
-		FileMany   string `db:"file_many"`
-		RelOne     string `db:"rel_one"`
-		RelMany    string `db:"rel_many"`
+	// ensures that the writable schema was reverted to its expected default
+	var writableSchema bool
+	app.Dao().DB().NewQuery("PRAGMA writable_schema").Row(&writableSchema)
+	if writableSchema == true {
+		t.Fatalf("Expected writable_schema to be OFF, got %v", writableSchema)
 	}
 
-	scenarios := []struct {
+	// check whether the columns DEFAULT definition was updated
+	// ---------------------------------------------------------------
+	tableInfo, err := app.Dao().TableInfo(collection.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tableInfoExpectations := map[string]string{
+		"select_one":   `'[]'`,
+		"select_many":  `''`,
+		"file_one":     `'[]'`,
+		"file_many":    `''`,
+		"rel_one":      `'[]'`,
+		"rel_many":     `''`,
+		"new_multiple": `'[]'`,
+	}
+	for col, dflt := range tableInfoExpectations {
+		t.Run("check default for "+col, func(t *testing.T) {
+			var row *models.TableInfoRow
+			for _, r := range tableInfo {
+				if r.Name == col {
+					row = r
+					break
+				}
+			}
+			if row == nil {
+				t.Fatalf("Missing info for column %q", col)
+			}
+
+			if v := row.DefaultValue.String(); v != dflt {
+				t.Fatalf("Expected default value %q, got %q", dflt, v)
+			}
+		})
+	}
+
+	// check whether the values were normalized
+	// ---------------------------------------------------------------
+	type fieldsExpectation struct {
+		SelectOne   string `db:"select_one"`
+		SelectMany  string `db:"select_many"`
+		FileOne     string `db:"file_one"`
+		FileMany    string `db:"file_many"`
+		RelOne      string `db:"rel_one"`
+		RelMany     string `db:"rel_many"`
+		NewMultiple string `db:"new_multiple"`
+	}
+
+	fieldsScenarios := []struct {
 		recordId string
-		expected expectation
+		expected fieldsExpectation
 	}{
 		{
 			"imy661ixudk5izi",
-			expectation{
-				SelectOne:  `[]`,
-				SelectMany: ``,
-				FileOne:    `[]`,
-				FileMany:   ``,
-				RelOne:     `[]`,
-				RelMany:    ``,
+			fieldsExpectation{
+				SelectOne:   `[]`,
+				SelectMany:  ``,
+				FileOne:     `[]`,
+				FileMany:    ``,
+				RelOne:      `[]`,
+				RelMany:     ``,
+				NewMultiple: `[]`,
 			},
 		},
 		{
 			"al1h9ijdeojtsjy",
-			expectation{
-				SelectOne:  `["optionB"]`,
-				SelectMany: `optionB`,
-				FileOne:    `["300_Jsjq7RdBgA.png"]`,
-				FileMany:   ``,
-				RelOne:     `["84nmscqy84lsi1t"]`,
-				RelMany:    `oap640cot4yru2s`,
+			fieldsExpectation{
+				SelectOne:   `["optionB"]`,
+				SelectMany:  `optionB`,
+				FileOne:     `["300_Jsjq7RdBgA.png"]`,
+				FileMany:    ``,
+				RelOne:      `["84nmscqy84lsi1t"]`,
+				RelMany:     `oap640cot4yru2s`,
+				NewMultiple: `[]`,
 			},
 		},
 		{
 			"84nmscqy84lsi1t",
-			expectation{
-				SelectOne:  `["optionB"]`,
-				SelectMany: `optionC`,
-				FileOne:    `["test_d61b33QdDU.txt"]`,
-				FileMany:   `test_tC1Yc87DfC.txt`,
-				RelOne:     `[]`,
-				RelMany:    `oap640cot4yru2s`,
+			fieldsExpectation{
+				SelectOne:   `["optionB"]`,
+				SelectMany:  `optionC`,
+				FileOne:     `["test_d61b33QdDU.txt"]`,
+				FileMany:    `test_tC1Yc87DfC.txt`,
+				RelOne:      `[]`,
+				RelMany:     `oap640cot4yru2s`,
+				NewMultiple: `[]`,
 			},
 		},
 	}
 
-	for _, s := range scenarios {
-		result := new(expectation)
+	for _, s := range fieldsScenarios {
+		t.Run("check fields for record "+s.recordId, func(t *testing.T) {
+			result := new(fieldsExpectation)
 
-		err := app.Dao().DB().Select(
-			"select_one",
-			"select_many",
-			"file_one",
-			"file_many",
-			"rel_one",
-			"rel_many",
-		).From(collection.Name).Where(dbx.HashExp{"id": s.recordId}).One(result)
-		if err != nil {
-			t.Errorf("[%s] Failed to load record: %v", s.recordId, err)
-			continue
-		}
+			err := app.Dao().DB().Select(
+				"select_one",
+				"select_many",
+				"file_one",
+				"file_many",
+				"rel_one",
+				"rel_many",
+				"new_multiple",
+			).From(collection.Name).Where(dbx.HashExp{"id": s.recordId}).One(result)
+			if err != nil {
+				t.Fatalf("Failed to load record: %v", err)
+			}
 
-		encodedResult, err := json.Marshal(result)
-		if err != nil {
-			t.Errorf("[%s] Failed to encode result: %v", s.recordId, err)
-			continue
-		}
+			encodedResult, err := json.Marshal(result)
+			if err != nil {
+				t.Fatalf("Failed to encode result: %v", err)
+			}
 
-		encodedExpectation, err := json.Marshal(s.expected)
-		if err != nil {
-			t.Errorf("[%s] Failed to encode expectation: %v", s.recordId, err)
-			continue
-		}
+			encodedExpectation, err := json.Marshal(s.expected)
+			if err != nil {
+				t.Fatalf("Failed to encode expectation: %v", err)
+			}
 
-		if !bytes.EqualFold(encodedExpectation, encodedResult) {
-			t.Errorf("[%s] Expected \n%s, \ngot \n%s", s.recordId, encodedExpectation, encodedResult)
-		}
+			if !bytes.EqualFold(encodedExpectation, encodedResult) {
+				t.Fatalf("Expected \n%s, \ngot \n%s", encodedExpectation, encodedResult)
+			}
+		})
 	}
 }

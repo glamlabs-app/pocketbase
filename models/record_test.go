@@ -15,6 +15,8 @@ import (
 )
 
 func TestNewRecord(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Name: "test_collection",
 		Schema: schema.NewSchema(
@@ -37,6 +39,8 @@ func TestNewRecord(t *testing.T) {
 }
 
 func TestNewRecordFromNullStringMap(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Name: "test",
 		Schema: schema.NewSchema(
@@ -200,6 +204,8 @@ func TestNewRecordFromNullStringMap(t *testing.T) {
 }
 
 func TestNewRecordsFromNullStringMaps(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Name: "test",
 		Schema: schema.NewSchema(
@@ -310,6 +316,8 @@ func TestNewRecordsFromNullStringMaps(t *testing.T) {
 }
 
 func TestRecordTableName(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{}
 	collection.Name = "test"
 	collection.RefreshId()
@@ -322,6 +330,8 @@ func TestRecordTableName(t *testing.T) {
 }
 
 func TestRecordCollection(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{}
 	collection.RefreshId()
 
@@ -333,6 +343,8 @@ func TestRecordCollection(t *testing.T) {
 }
 
 func TestRecordOriginalCopy(t *testing.T) {
+	t.Parallel()
+
 	m := models.NewRecord(&models.Collection{})
 	m.Load(map[string]any{"f": "123"})
 
@@ -360,6 +372,8 @@ func TestRecordOriginalCopy(t *testing.T) {
 }
 
 func TestRecordCleanCopy(t *testing.T) {
+	t.Parallel()
+
 	m := models.NewRecord(&models.Collection{
 		Name: "cname",
 		Type: models.CollectionTypeAuth,
@@ -392,6 +406,8 @@ func TestRecordCleanCopy(t *testing.T) {
 }
 
 func TestRecordSetAndGetExpand(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{}
 	m := models.NewRecord(collection)
 
@@ -409,6 +425,8 @@ func TestRecordSetAndGetExpand(t *testing.T) {
 }
 
 func TestRecordMergeExpand(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{}
 	m := models.NewRecord(collection)
 	m.Id = "m"
@@ -501,6 +519,8 @@ func TestRecordMergeExpand(t *testing.T) {
 }
 
 func TestRecordMergeExpandNilCheck(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{}
 
 	scenarios := []struct {
@@ -541,7 +561,77 @@ func TestRecordMergeExpandNilCheck(t *testing.T) {
 	}
 }
 
+func TestRecordExpandedRel(t *testing.T) {
+	t.Parallel()
+
+	collection := &models.Collection{}
+
+	main := models.NewRecord(collection)
+
+	single := models.NewRecord(collection)
+	single.Id = "single"
+
+	multiple1 := models.NewRecord(collection)
+	multiple1.Id = "multiple1"
+
+	multiple2 := models.NewRecord(collection)
+	multiple2.Id = "multiple2"
+
+	main.SetExpand(map[string]any{
+		"single":   single,
+		"multiple": []*models.Record{multiple1, multiple2},
+	})
+
+	if v := main.ExpandedOne("missing"); v != nil {
+		t.Fatalf("Expected nil, got %v", v)
+	}
+
+	if v := main.ExpandedOne("single"); v == nil || v.Id != "single" {
+		t.Fatalf("Expected record with id %q, got %v", "single", v)
+	}
+
+	if v := main.ExpandedOne("multiple"); v == nil || v.Id != "multiple1" {
+		t.Fatalf("Expected record with id %q, got %v", "multiple1", v)
+	}
+}
+
+func TestRecordExpandedAll(t *testing.T) {
+	t.Parallel()
+
+	collection := &models.Collection{}
+
+	main := models.NewRecord(collection)
+
+	single := models.NewRecord(collection)
+	single.Id = "single"
+
+	multiple1 := models.NewRecord(collection)
+	multiple1.Id = "multiple1"
+
+	multiple2 := models.NewRecord(collection)
+	multiple2.Id = "multiple2"
+
+	main.SetExpand(map[string]any{
+		"single":   single,
+		"multiple": []*models.Record{multiple1, multiple2},
+	})
+
+	if v := main.ExpandedAll("missing"); v != nil {
+		t.Fatalf("Expected nil, got %v", v)
+	}
+
+	if v := main.ExpandedAll("single"); len(v) != 1 || v[0].Id != "single" {
+		t.Fatalf("Expected [single] slice, got %v", v)
+	}
+
+	if v := main.ExpandedAll("multiple"); len(v) != 2 || v[0].Id != "multiple1" || v[1].Id != "multiple2" {
+		t.Fatalf("Expected [multiple1, multiple2] slice, got %v", v)
+	}
+}
+
 func TestRecordSchemaData(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Type: models.CollectionTypeAuth,
 		Schema: schema.NewSchema(
@@ -575,6 +665,8 @@ func TestRecordSchemaData(t *testing.T) {
 }
 
 func TestRecordUnknownData(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -655,6 +747,8 @@ func TestRecordUnknownData(t *testing.T) {
 }
 
 func TestRecordSetAndGet(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -664,6 +758,22 @@ func TestRecordSetAndGet(t *testing.T) {
 			&schema.SchemaField{
 				Name: "field2",
 				Type: schema.FieldTypeNumber,
+			},
+			// fields that are not explicitly set to check
+			// the default retrieval value (single and multiple)
+			&schema.SchemaField{
+				Name: "field3",
+				Type: schema.FieldTypeBool,
+			},
+			&schema.SchemaField{
+				Name:    "field4",
+				Type:    schema.FieldTypeSelect,
+				Options: &schema.SelectOptions{MaxSelect: 2},
+			},
+			&schema.SchemaField{
+				Name:    "field5",
+				Type:    schema.FieldTypeRelation,
+				Options: &schema.RelationOptions{MaxSelect: types.Pointer(1)},
 			},
 		),
 	}
@@ -677,28 +787,40 @@ func TestRecordSetAndGet(t *testing.T) {
 	m.Set("unknown", 456)                        // undefined fields are allowed but not exported by default
 	m.Set("expand", map[string]any{"test": 123}) // should store the value in m.expand
 
-	if m.Get("id") != "test_id" {
-		t.Fatalf("Expected id %q, got %q", "test_id", m.Get("id"))
+	if v := m.Get("id"); v != "test_id" {
+		t.Fatalf("Expected id %q, got %q", "test_id", v)
 	}
 
-	if m.GetString("created") != "2022-09-15 00:00:00.123Z" {
-		t.Fatalf("Expected created %q, got %q", "2022-09-15 00:00:00.123Z", m.GetString("created"))
+	if v := m.GetString("created"); v != "2022-09-15 00:00:00.123Z" {
+		t.Fatalf("Expected created %q, got %q", "2022-09-15 00:00:00.123Z", v)
 	}
 
-	if m.GetString("updated") != "" {
-		t.Fatalf("Expected updated to be empty, got %q", m.GetString("updated"))
+	if v := m.GetString("updated"); v != "" {
+		t.Fatalf("Expected updated to be empty, got %q", v)
 	}
 
-	if m.Get("field1") != "123" {
-		t.Fatalf("Expected field1 %q, got %v", "123", m.Get("field1"))
+	if v, ok := m.Get("field1").(string); !ok || v != "123" {
+		t.Fatalf("Expected field1 %#v, got %#v", "123", m.Get("field1"))
 	}
 
-	if m.Get("field2") != 0.0 {
-		t.Fatalf("Expected field2 %v, got %v", 0.0, m.Get("field2"))
+	if v, ok := m.Get("field2").(float64); !ok || v != 0.0 {
+		t.Fatalf("Expected field2 %#v, got %#v", 0.0, m.Get("field2"))
 	}
 
-	if m.Get("unknown") != 456 {
-		t.Fatalf("Expected unknown %v, got %v", 456, m.Get("unknown"))
+	if v, ok := m.Get("field3").(bool); !ok || v != false {
+		t.Fatalf("Expected field3 %#v, got %#v", false, m.Get("field3"))
+	}
+
+	if v, ok := m.Get("field4").([]string); !ok || len(v) != 0 {
+		t.Fatalf("Expected field4 %#v, got %#v", "[]", m.Get("field4"))
+	}
+
+	if v, ok := m.Get("field5").(string); !ok || len(v) != 0 {
+		t.Fatalf("Expected field5 %#v, got %#v", "", m.Get("field5"))
+	}
+
+	if v := m.Get("unknown"); v != 456 {
+		t.Fatalf("Expected unknown %v, got %v", 456, v)
 	}
 
 	if m.Expand()["test"] != 123 {
@@ -707,6 +829,8 @@ func TestRecordSetAndGet(t *testing.T) {
 }
 
 func TestRecordGetBool(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		value    any
 		expected bool
@@ -738,6 +862,8 @@ func TestRecordGetBool(t *testing.T) {
 }
 
 func TestRecordGetString(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		value    any
 		expected string
@@ -768,6 +894,8 @@ func TestRecordGetString(t *testing.T) {
 }
 
 func TestRecordGetInt(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		value    any
 		expected int
@@ -800,6 +928,8 @@ func TestRecordGetInt(t *testing.T) {
 }
 
 func TestRecordGetFloat(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		value    any
 		expected float64
@@ -832,6 +962,8 @@ func TestRecordGetFloat(t *testing.T) {
 }
 
 func TestRecordGetTime(t *testing.T) {
+	t.Parallel()
+
 	nowTime := time.Now()
 	testTime, _ := time.Parse(types.DefaultDateLayout, "2022-01-01 08:00:40.000Z")
 
@@ -865,6 +997,8 @@ func TestRecordGetTime(t *testing.T) {
 }
 
 func TestRecordGetDateTime(t *testing.T) {
+	t.Parallel()
+
 	nowTime := time.Now()
 	testTime, _ := time.Parse(types.DefaultDateLayout, "2022-01-01 08:00:40.000Z")
 
@@ -898,6 +1032,8 @@ func TestRecordGetDateTime(t *testing.T) {
 }
 
 func TestRecordGetStringSlice(t *testing.T) {
+	t.Parallel()
+
 	nowTime := time.Now()
 
 	scenarios := []struct {
@@ -939,6 +1075,8 @@ func TestRecordGetStringSlice(t *testing.T) {
 }
 
 func TestRecordUnmarshalJSONField(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(&schema.SchemaField{
 			Name: "field",
@@ -994,6 +1132,8 @@ func TestRecordUnmarshalJSONField(t *testing.T) {
 }
 
 func TestRecordBaseFilesPath(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{}
 	collection.RefreshId()
 	collection.Name = "test"
@@ -1010,6 +1150,8 @@ func TestRecordBaseFilesPath(t *testing.T) {
 }
 
 func TestRecordFindFileFieldByFile(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -1067,6 +1209,8 @@ func TestRecordFindFileFieldByFile(t *testing.T) {
 }
 
 func TestRecordLoadAndData(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -1140,6 +1284,8 @@ func TestRecordLoadAndData(t *testing.T) {
 }
 
 func TestRecordColumnValueMap(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -1227,6 +1373,8 @@ func TestRecordColumnValueMap(t *testing.T) {
 }
 
 func TestRecordPublicExportAndMarshalJSON(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Name: "c_name",
 		Schema: schema.NewSchema(
@@ -1371,6 +1519,8 @@ func TestRecordPublicExportAndMarshalJSON(t *testing.T) {
 }
 
 func TestRecordUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -1459,6 +1609,8 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 }
 
 func TestRecordReplaceModifers(t *testing.T) {
+	t.Parallel()
+
 	collection := &models.Collection{
 		Schema: schema.NewSchema(
 			&schema.SchemaField{
@@ -1566,6 +1718,8 @@ func TestRecordReplaceModifers(t *testing.T) {
 // -------------------------------------------------------------------
 
 func TestRecordUsername(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		expectError    bool
@@ -1607,6 +1761,8 @@ func TestRecordUsername(t *testing.T) {
 }
 
 func TestRecordEmail(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		expectError    bool
@@ -1648,6 +1804,8 @@ func TestRecordEmail(t *testing.T) {
 }
 
 func TestRecordEmailVisibility(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		value          bool
@@ -1690,6 +1848,8 @@ func TestRecordEmailVisibility(t *testing.T) {
 }
 
 func TestRecordEmailVerified(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		value          bool
@@ -1732,6 +1892,8 @@ func TestRecordEmailVerified(t *testing.T) {
 }
 
 func TestRecordTokenKey(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		expectError    bool
@@ -1773,6 +1935,8 @@ func TestRecordTokenKey(t *testing.T) {
 }
 
 func TestRecordRefreshTokenKey(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		expectError    bool
@@ -1812,6 +1976,8 @@ func TestRecordRefreshTokenKey(t *testing.T) {
 }
 
 func TestRecordLastResetSentAt(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		expectError    bool
@@ -1856,6 +2022,8 @@ func TestRecordLastResetSentAt(t *testing.T) {
 }
 
 func TestRecordLastVerificationSentAt(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		expectError    bool
@@ -1900,6 +2068,8 @@ func TestRecordLastVerificationSentAt(t *testing.T) {
 }
 
 func TestRecordPasswordHash(t *testing.T) {
+	t.Parallel()
+
 	m := models.NewRecord(&models.Collection{})
 
 	if v := m.PasswordHash(); v != "" {
@@ -1914,6 +2084,8 @@ func TestRecordPasswordHash(t *testing.T) {
 }
 
 func TestRecordValidatePassword(t *testing.T) {
+	t.Parallel()
+
 	// 123456
 	hash := "$2a$10$YKU8mPP8sTE3xZrpuM.xQuq27KJ7aIJB2oUeKPsDDqZshbl5g5cDK"
 
@@ -1942,6 +2114,8 @@ func TestRecordValidatePassword(t *testing.T) {
 }
 
 func TestRecordSetPassword(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []struct {
 		collectionType string
 		password       string

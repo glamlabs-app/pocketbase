@@ -3,14 +3,13 @@
 </script>
 
 <script>
+    import tooltip from "@/actions/tooltip";
+    import Field from "@/components/base/Field.svelte";
+    import Toggler from "@/components/base/Toggler.svelte";
+    import { errors, setErrors } from "@/stores/errors";
+    import CommonHelper from "@/utils/CommonHelper";
     import { createEventDispatcher, onMount } from "svelte";
     import { slide } from "svelte/transition";
-    import { SchemaField } from "pocketbase";
-    import CommonHelper from "@/utils/CommonHelper";
-    import tooltip from "@/actions/tooltip";
-    import { errors, setErrors } from "@/stores/errors";
-    import Toggler from "@/components/base/Toggler.svelte";
-    import Field from "@/components/base/Field.svelte";
 
     const componentId = "f_" + CommonHelper.randomString(8);
 
@@ -23,7 +22,7 @@
     };
 
     export let key = "";
-    export let field = new SchemaField();
+    export let field = CommonHelper.initSchemaField();
 
     let nameInput;
     let showOptions = false;
@@ -55,6 +54,7 @@
 
     function remove() {
         if (!field.id) {
+            collapse();
             dispatch("remove");
         } else {
             field.toDelete = true;
@@ -66,6 +66,13 @@
 
         // reset all errors since the error index key would have been changed
         setErrors({});
+    }
+
+    function duplicate() {
+        if (!field.toDelete) {
+            collapse();
+            dispatch("duplicate");
+        }
     }
 
     function normalizeFieldName(name) {
@@ -120,7 +127,7 @@
     class:required={field.required}
     class:expanded={interactive && showOptions}
     class:deleted={field.toDelete}
-    transition:slide|local={{ duration: 150 }}
+    transition:slide={{ duration: 150 }}
 >
     <div class="schema-field-header">
         {#if interactive}
@@ -133,11 +140,11 @@
             name="schema.{key}.name"
             inlineError
         >
-            <div class="markers">
-                {#if field.required}
-                    <span class="marker marker-required" use:tooltip={requiredLabel} />
-                {/if}
-            </div>
+            {#if field.required}
+                <div class="field-labels">
+                    <span class="label label-success">{requiredLabel}</span>
+                </div>
+            {/if}
 
             <div
                 class="form-field-addon prefix no-pointer-events field-type-icon"
@@ -191,6 +198,7 @@
                 class:btn-hint={!showOptions && !hasErrors}
                 class:btn-danger={hasErrors}
                 on:click={toggle}
+                aria-expanded={showOptions}
             >
                 <i class="ri-settings-3-line" />
             </button>
@@ -198,52 +206,73 @@
     </div>
 
     {#if interactive && showOptions}
-        <div class="schema-field-options" transition:slide|local={{ duration: 150 }}>
-            <div class="grid grid-sm">
-                <div class="col-sm-12 hidden-empty">
-                    <slot name="options" {interactive} {hasErrors} />
-                </div>
+        <div class="schema-field-options" transition:slide={{ duration: 150 }}>
+            <div class="hidden-empty m-b-sm">
+                <slot name="options" {interactive} {hasErrors} />
+            </div>
 
-                <slot name="beforeNonempty" {interactive} {hasErrors} />
+            <div class="schema-field-options-footer">
+                <Field class="form-field form-field-toggle" name="requried" let:uniqueId>
+                    <input type="checkbox" id={uniqueId} bind:checked={field.required} />
+                    <label for={uniqueId}>
+                        <span class="txt">{requiredLabel}</span>
+                        <i
+                            class="ri-information-line link-hint"
+                            use:tooltip={{
+                                text: `Requires the field value NOT to be ${CommonHelper.zeroDefaultStr(
+                                    field,
+                                )}.`,
+                            }}
+                        />
+                    </label>
+                </Field>
 
-                <div class="col-sm-4">
-                    <Field class="form-field form-field-toggle m-0" name="requried" let:uniqueId>
-                        <input type="checkbox" id={uniqueId} bind:checked={field.required} />
-                        <label for={uniqueId}>
-                            <span class="txt">{requiredLabel}</span>
-                            <i
-                                class="ri-information-line link-hint"
-                                use:tooltip={{
-                                    text: `Requires the field value NOT to be ${CommonHelper.zeroDefaultStr(
-                                        field
-                                    )}.`,
-                                    position: "right",
-                                }}
-                            />
-                        </label>
-                    </Field>
-                </div>
+                <Field class="form-field form-field-toggle" name="presentable" let:uniqueId>
+                    <input type="checkbox" id={uniqueId} bind:checked={field.presentable} />
+                    <label for={uniqueId}>
+                        <span class="txt">Presentable</span>
+                        <i
+                            class="ri-information-line link-hint"
+                            use:tooltip={{
+                                text: `Whether the field should be preferred in the Admin UI relation listings (default to auto).`,
+                            }}
+                        />
+                    </label>
+                </Field>
 
-                <slot name="afterNonempty" {interactive} {hasErrors} />
+                <slot name="optionsFooter" {interactive} {hasErrors} />
 
                 {#if !field.toDelete}
-                    <div class="col-sm-4 m-l-auto txt-right">
-                        <div class="flex-fill" />
+                    <div class="m-l-auto txt-right">
                         <div class="inline-flex flex-gap-sm flex-nowrap">
-                            <button
-                                type="button"
+                            <div
+                                tabindex="0"
+                                role="button"
                                 aria-label="More"
                                 class="btn btn-circle btn-sm btn-transparent"
                             >
-                                <i class="ri-more-line" />
+                                <i class="ri-more-line" aria-hidden="true" />
                                 <Toggler
                                     class="dropdown dropdown-sm dropdown-upside dropdown-right dropdown-nowrap no-min-width"
                                 >
-                                    <button type="button" class="dropdown-item txt-right" on:click={remove}>
+                                    <button
+                                        type="button"
+                                        class="dropdown-item"
+                                        role="menuitem"
+                                        on:click|preventDefault={duplicate}
+                                    >
+                                        <span class="txt">Duplicate</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="dropdown-item"
+                                        role="menuitem"
+                                        on:click|preventDefault={remove}
+                                    >
                                         <span class="txt">Remove</span>
                                     </button>
                                 </Toggler>
-                            </button>
+                            </div>
                         </div>
                     </div>
                 {/if}

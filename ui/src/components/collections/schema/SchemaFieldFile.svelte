@@ -1,13 +1,13 @@
 <script>
-    import CommonHelper from "@/utils/CommonHelper";
     import tooltip from "@/actions/tooltip";
     import Field from "@/components/base/Field.svelte";
-    import Toggler from "@/components/base/Toggler.svelte";
-    import ObjectSelect from "@/components/base/ObjectSelect.svelte";
     import MimeTypeSelectOption from "@/components/base/MimeTypeSelectOption.svelte";
     import MultipleValueInput from "@/components/base/MultipleValueInput.svelte";
+    import ObjectSelect from "@/components/base/ObjectSelect.svelte";
+    import Toggler from "@/components/base/Toggler.svelte";
     import SchemaField from "@/components/collections/schema/SchemaField.svelte";
     import baseMimeTypesList from "@/mimes.js";
+    import CommonHelper from "@/utils/CommonHelper";
 
     export let field;
     export let key = "";
@@ -70,7 +70,7 @@
     }
 </script>
 
-<SchemaField bind:field {key} on:rename on:remove {...$$restProps}>
+<SchemaField bind:field {key} on:rename on:remove on:duplicate {...$$restProps}>
     <svelte:fragment let:interactive>
         <div class="separator" />
 
@@ -117,13 +117,14 @@
                         bind:keyOfSelected={field.options.mimeTypes}
                     />
                     <div class="help-block">
-                        <button type="button" class="inline-flex flex-gap-0">
+                        <div tabindex="0" role="button" class="inline-flex flex-gap-0">
                             <span class="txt link-primary">Choose presets</span>
-                            <i class="ri-arrow-drop-down-fill" />
+                            <i class="ri-arrow-drop-down-fill" aria-hidden="true" />
                             <Toggler class="dropdown dropdown-sm dropdown-nowrap dropdown-left">
                                 <button
                                     type="button"
                                     class="dropdown-item closable"
+                                    role="menuitem"
                                     on:click={() => {
                                         field.options.mimeTypes = [
                                             "image/jpeg",
@@ -139,6 +140,7 @@
                                 <button
                                     type="button"
                                     class="dropdown-item closable"
+                                    role="menuitem"
                                     on:click={() => {
                                         field.options.mimeTypes = [
                                             "application/pdf",
@@ -154,6 +156,7 @@
                                 <button
                                     type="button"
                                     class="dropdown-item closable"
+                                    role="menuitem"
                                     on:click={() => {
                                         field.options.mimeTypes = [
                                             "video/mp4",
@@ -168,6 +171,7 @@
                                 <button
                                     type="button"
                                     class="dropdown-item closable"
+                                    role="menuitem"
                                     on:click={() => {
                                         field.options.mimeTypes = [
                                             "application/zip",
@@ -179,7 +183,7 @@
                                     <span class="txt">Archives (zip, 7zip, rar)</span>
                                 </button>
                             </Toggler>
-                        </button>
+                        </div>
                     </div>
                 </Field>
             </div>
@@ -205,7 +209,7 @@
                         <span class="txt">Use comma as separator.</span>
                         <button type="button" class="inline-flex flex-gap-0">
                             <span class="txt link-primary">Supported formats</span>
-                            <i class="ri-arrow-drop-down-fill" />
+                            <i class="ri-arrow-drop-down-fill" aria-hidden="true" />
                             <Toggler class="dropdown dropdown-sm dropdown-center dropdown-nowrap p-r-10">
                                 <ul class="m-0">
                                     <li>
@@ -265,27 +269,21 @@
         </div>
     </svelte:fragment>
 
-    <svelte:fragment slot="afterNonempty">
-        <div class="col-sm-4">
-            <Field
-                class="form-field form-field-toggle m-0"
-                name="schema.{key}.options.protected"
-                let:uniqueId
+    <svelte:fragment slot="optionsFooter">
+        <Field class="form-field form-field-toggle" name="schema.{key}.options.protected" let:uniqueId>
+            <input type="checkbox" id={uniqueId} bind:checked={field.options.protected} />
+            <label for={uniqueId}>
+                <span class="txt">Protected</span>
+            </label>
+            <a
+                href={import.meta.env.PB_PROTECTED_FILE_DOCS}
+                class="toggle-info txt-sm txt-hint m-l-5"
+                target="_blank"
+                rel="noopener"
             >
-                <input type="checkbox" id={uniqueId} bind:checked={field.options.protected} />
-                <label for={uniqueId}>
-                    <span class="txt">Protected</span>
-                </label>
-                <a
-                    href={import.meta.env.PB_PROTECTED_FILE_DOCS}
-                    class="toggle-info txt-sm txt-hint m-l-5"
-                    target="_blank"
-                    rel="noopener"
-                >
-                    (Learn more)
-                </a>
-            </Field>
-        </div>
+                (Learn more)
+            </a>
+        </Field>
     </svelte:fragment>
 </SchemaField>
 

@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	indexRegex       = regexp.MustCompile(`(?im)create\s+(unique\s+)?\s*index\s*(if\s+not\s+exists\s+)?(\S*)\s+on\s+(\S*)\s+\(([\s\S]*)\)(?:\s*where\s+([\s\S]*))?`)
+	indexRegex       = regexp.MustCompile(`(?im)create\s+(unique\s+)?\s*index\s*(if\s+not\s+exists\s+)?(\S*)\s+on\s+(\S*)\s*\(([\s\S]*)\)(?:\s*where\s+([\s\S]*))?`)
 	indexColumnRegex = regexp.MustCompile(`(?im)^([\s\S]+?)(?:\s+collate\s+([\w]+))?(?:\s+(asc|desc))?$`)
 )
 
@@ -191,4 +191,17 @@ func ParseIndex(createIndexExpr string) Index {
 	result.Where = strings.TrimSpace(matches[6])
 
 	return result
+}
+
+// HasColumnUniqueIndex loosely checks whether the specified column has
+// a single column unique index (WHERE statements are ignored).
+func HasSingleColumnUniqueIndex(column string, indexes []string) bool {
+	for _, idx := range indexes {
+		parsed := ParseIndex(idx)
+		if parsed.Unique && len(parsed.Columns) == 1 && strings.EqualFold(parsed.Columns[0].Name, column) {
+			return true
+		}
+	}
+
+	return false
 }

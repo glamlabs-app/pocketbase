@@ -11,7 +11,7 @@
     let thumbUrl = "";
     let originalUrl = "";
     let token = "";
-    let isLoadingToken = false;
+    let isLoadingToken = true;
 
     loadFileToken();
 
@@ -62,6 +62,7 @@
         {#if type === "image"}
             <img
                 draggable={false}
+                loading="lazy"
                 src={thumbUrl}
                 alt={filename}
                 title="Preview {filename}"
@@ -75,4 +76,6 @@
     </a>
 {/if}
 
-<PreviewPopup bind:this={previewPopup} />
+{#if hasPreview}
+    <PreviewPopup bind:this={previewPopup} />
+{/if}

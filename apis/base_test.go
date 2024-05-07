@@ -1,6 +1,7 @@
 package apis_test
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,10 +11,13 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/rest"
 	"github.com/spf13/cast"
 )
 
 func Test404(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Method:          http.MethodGet,
@@ -52,6 +56,8 @@ func Test404(t *testing.T) {
 }
 
 func TestCustomRoutesAndErrorsHandling(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:   "custom route",
@@ -141,6 +147,8 @@ func TestCustomRoutesAndErrorsHandling(t *testing.T) {
 }
 
 func TestRemoveTrailingSlashMiddleware(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:   "non /api/* route (exact match)",
@@ -213,16 +221,27 @@ func TestRemoveTrailingSlashMiddleware(t *testing.T) {
 	}
 }
 
-func TestEagerRequestDataCache(t *testing.T) {
+func TestMultiBinder(t *testing.T) {
+	t.Parallel()
+
+	rawJson := `{"name":"test123"}`
+
+	formData, mp, err := tests.MockMultipartData(map[string]string{
+		rest.MultipartJsonKey: rawJson,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	scenarios := []tests.ApiScenario{
 		{
-			Name:   "[UNKNOWN] unsupported eager cached request method",
-			Method: "UNKNOWN",
+			Name:   "non-api group route",
+			Method: "POST",
 			Url:    "/custom",
-			Body:   strings.NewReader(`{"name":"test123"}`),
+			Body:   strings.NewReader(rawJson),
 			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
 				e.AddRoute(echo.Route{
-					Method: "UNKNOWN",
+					Method: "POST",
 					Path:   "/custom",
 					Handler: func(c echo.Context) error {
 						data := &struct {
@@ -233,59 +252,168 @@ func TestEagerRequestDataCache(t *testing.T) {
 							return err
 						}
 
-						// since the unknown method is not eager cache support
-						// it should fail reading the json body twice
-						r := apis.RequestData(c)
-						if v := cast.ToString(r.Data["name"]); v != "" {
-							t.Fatalf("Expected empty request data body, got, %v", r.Data)
+						// try to read the body again
+						r := apis.RequestInfo(c)
+						if v := cast.ToString(r.Data["name"]); v != "test123" {
+							t.Fatalf("Expected request data with name %q, got, %q", "test123", v)
 						}
 
-						return c.String(200, data.Name)
+						return c.NoContent(200)
 					},
 				})
 			},
-			ExpectedStatus:  200,
-			ExpectedContent: []string{"test123"},
+			ExpectedStatus: 200,
+		},
+		{
+			Name:   "api group route",
+			Method: "GET",
+			Url:    "/api/admins",
+			Body:   strings.NewReader(rawJson),
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+					return func(c echo.Context) error {
+						// it is not important whether the route handler return an error since
+						// we just need to ensure that the eagerRequestInfoCache was registered
+						next(c)
+
+						// ensure that the body was read at least once
+						data := &struct {
+							Name string `json:"name"`
+						}{}
+						c.Bind(data)
+
+						// try to read the body again
+						r := apis.RequestInfo(c)
+						if v := cast.ToString(r.Data["name"]); v != "test123" {
+							t.Fatalf("Expected request data with name %q, got, %q", "test123", v)
+						}
+
+						return nil
+					}
+				})
+			},
+			ExpectedStatus: 200,
+		},
+		{
+			Name:   "custom route with @jsonPayload as multipart body",
+			Method: "POST",
+			Url:    "/custom",
+			Body:   formData,
+			RequestHeaders: map[string]string{
+				"Content-Type": mp.FormDataContentType(),
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.AddRoute(echo.Route{
+					Method: "POST",
+					Path:   "/custom",
+					Handler: func(c echo.Context) error {
+						data := &struct {
+							Name string `json:"name"`
+						}{}
+
+						if err := c.Bind(data); err != nil {
+							return err
+						}
+
+						// try to read the body again
+						r := apis.RequestInfo(c)
+						if v := cast.ToString(r.Data["name"]); v != "test123" {
+							t.Fatalf("Expected request data with name %q, got, %q", "test123", v)
+						}
+
+						return c.NoContent(200)
+					},
+				})
+			},
+			ExpectedStatus: 200,
 		},
 	}
 
-	// supported eager cache request methods
-	supportedMethods := []string{"POST", "PUT", "PATCH", "DELETE"}
-	for _, m := range supportedMethods {
-		scenarios = append(
-			scenarios,
-			tests.ApiScenario{
-				Name:   fmt.Sprintf("[%s] valid cached json body request", m),
-				Method: http.MethodPost,
-				Url:    "/custom",
-				Body:   strings.NewReader(`{"name":"test123"}`),
-				BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
-					e.AddRoute(echo.Route{
-						Method: http.MethodPost,
-						Path:   "/custom",
-						Handler: func(c echo.Context) error {
-							data := &struct {
-								Name string `json:"name"`
-							}{}
+	for _, scenario := range scenarios {
+		scenario.Test(t)
+	}
+}
 
-							if err := c.Bind(data); err != nil {
-								return err
-							}
+func TestErrorHandler(t *testing.T) {
+	t.Parallel()
 
-							// try to read the body again
-							r := apis.RequestData(c)
-							if v := cast.ToString(r.Data["name"]); v != "test123" {
-								t.Fatalf("Expected request data with name %q, got, %q", "test123", v)
-							}
-
-							return c.String(200, data.Name)
-						},
-					})
-				},
-				ExpectedStatus:  200,
-				ExpectedContent: []string{"test123"},
+	scenarios := []tests.ApiScenario{
+		{
+			Name:   "apis.ApiError",
+			Method: http.MethodGet,
+			Url:    "/test",
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.GET("/test", func(c echo.Context) error {
+					return apis.NewApiError(418, "test", nil)
+				})
 			},
-		)
+			ExpectedStatus:  418,
+			ExpectedContent: []string{`"message":"Test."`},
+		},
+		{
+			Name:   "wrapped apis.ApiError",
+			Method: http.MethodGet,
+			Url:    "/test",
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.GET("/test", func(c echo.Context) error {
+					return fmt.Errorf("example 123: %w", apis.NewApiError(418, "test", nil))
+				})
+			},
+			ExpectedStatus:     418,
+			ExpectedContent:    []string{`"message":"Test."`},
+			NotExpectedContent: []string{"example", "123"},
+		},
+		{
+			Name:   "echo.HTTPError",
+			Method: http.MethodGet,
+			Url:    "/test",
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.GET("/test", func(c echo.Context) error {
+					return echo.NewHTTPError(418, "test")
+				})
+			},
+			ExpectedStatus:  418,
+			ExpectedContent: []string{`"message":"Test."`},
+		},
+		{
+			Name:   "wrapped echo.HTTPError",
+			Method: http.MethodGet,
+			Url:    "/test",
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.GET("/test", func(c echo.Context) error {
+					return fmt.Errorf("example 123: %w", echo.NewHTTPError(418, "test"))
+				})
+			},
+			ExpectedStatus:     418,
+			ExpectedContent:    []string{`"message":"Test."`},
+			NotExpectedContent: []string{"example", "123"},
+		},
+		{
+			Name:   "wrapped sql.ErrNoRows",
+			Method: http.MethodGet,
+			Url:    "/test",
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.GET("/test", func(c echo.Context) error {
+					return fmt.Errorf("example 123: %w", sql.ErrNoRows)
+				})
+			},
+			ExpectedStatus:     404,
+			ExpectedContent:    []string{`"data":{}`},
+			NotExpectedContent: []string{"example", "123"},
+		},
+		{
+			Name:   "custom error",
+			Method: http.MethodGet,
+			Url:    "/test",
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				e.GET("/test", func(c echo.Context) error {
+					return fmt.Errorf("example 123")
+				})
+			},
+			ExpectedStatus:     400,
+			ExpectedContent:    []string{`"data":{}`},
+			NotExpectedContent: []string{"example", "123"},
+		},
 	}
 
 	for _, scenario := range scenarios {

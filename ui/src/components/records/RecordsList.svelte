@@ -6,25 +6,28 @@
     import CommonHelper from "@/utils/CommonHelper";
     import tooltip from "@/actions/tooltip";
     import { confirm } from "@/stores/confirmation";
-    import { addSuccessToast, addErrorToast } from "@/stores/toasts";
+    import { addSuccessToast } from "@/stores/toasts";
+    import { collections } from "@/stores/collections";
     import SortHeader from "@/components/base/SortHeader.svelte";
     import Toggler from "@/components/base/Toggler.svelte";
     import Field from "@/components/base/Field.svelte";
     import CopyIcon from "@/components/base/CopyIcon.svelte";
     import FormattedDate from "@/components/base/FormattedDate.svelte";
-    import HorizontalScroller from "@/components/base/HorizontalScroller.svelte";
+    import Scroller from "@/components/base/Scroller.svelte";
     import RecordFieldValue from "@/components/records/RecordFieldValue.svelte";
 
     const dispatch = createEventDispatcher();
     const sortRegex = /^([\+\-])?(\w+)$/;
+    const perPage = 40;
 
     export let collection;
     export let sort = "";
     export let filter = "";
 
+    let scrollWrapper;
     let records = [];
     let currentPage = 1;
-    let totalRecords = 0;
+    let lastTotal = 0;
     let bulkSelected = {};
     let isLoading = true;
     let isDeleting = false;
@@ -32,13 +35,21 @@
     let columnsTrigger;
     let hiddenColumns = [];
     let collumnsToHide = [];
+    let hiddenColumnsKey = "";
 
     $: if (collection?.id) {
+        hiddenColumnsKey = collection.id + "@hiddenColumns";
         loadStoredHiddenColumns();
         clearList();
     }
 
+    $: isView = collection?.type === "view";
+
+    $: isAuth = collection?.type === "auth";
+
     $: fields = collection?.schema || [];
+
+    $: editorFields = fields.filter((field) => field.type === "editor");
 
     $: relFields = fields.filter((field) => field.type === "relation");
 
@@ -48,7 +59,7 @@
         load(1);
     }
 
-    $: canLoadMore = totalRecords > records.length;
+    $: canLoadMore = lastTotal >= perPage;
 
     $: totalBulkSelected = Object.keys(bulkSelected).length;
 
@@ -58,12 +69,12 @@
         updateStoredHiddenColumns();
     }
 
-    $: hasCreated = !collection?.$isView || (records.length > 0 && records[0].created != "");
+    $: hasCreated = !isView || (records.length > 0 && typeof records[0].created != "undefined");
 
-    $: hasUpdated = !collection?.$isView || (records.length > 0 && records[0].updated != "");
+    $: hasUpdated = !isView || (records.length > 0 && typeof records[0].updated != "undefined");
 
     $: collumnsToHide = [].concat(
-        collection.$isAuth
+        isAuth
             ? [
                   { id: "@username", name: "username" },
                   { id: "@email", name: "email" },
@@ -73,7 +84,7 @@
             return { id: f.id, name: f.name };
         }),
         hasCreated ? { id: "@created", name: "created" } : [],
-        hasUpdated ? { id: "@updated", name: "updated" } : []
+        hasUpdated ? { id: "@updated", name: "updated" } : [],
     );
 
     function updateStoredHiddenColumns() {
@@ -81,7 +92,11 @@
             return;
         }
 
-        localStorage.setItem(collection?.id + "@hiddenCollumns", JSON.stringify(hiddenColumns));
+        if (hiddenColumns.length) {
+            localStorage.setItem(hiddenColumnsKey, JSON.stringify(hiddenColumns));
+        } else {
+            localStorage.removeItem(hiddenColumnsKey);
+        }
     }
 
     function loadStoredHiddenColumns() {
@@ -92,9 +107,15 @@
         }
 
         try {
-            const encoded = localStorage.getItem(collection.id + "@hiddenCollumns");
-            if (encoded) hiddenColumns = JSON.parse(encoded) || [];
+            const encoded = localStorage.getItem(hiddenColumnsKey);
+            if (encoded) {
+                hiddenColumns = JSON.parse(encoded) || [];
+            }
         } catch (_) {}
+    }
+
+    export function hasRecord(id) {
+        return !!records.find((r) => r.id);
     }
 
     export async function reloadLoadedPages() {
@@ -117,23 +138,40 @@
         // allow sorting by the relation display fields
         let listSort = sort;
         const sortMatch = listSort.match(sortRegex);
-        const relField = sortMatch ? relFields.find((f) => f.name === sortMatch[2]) : null;
-        if (sortMatch && relField?.options?.displayFields?.length > 0) {
+        const sortRelField = sortMatch ? relFields.find((f) => f.name === sortMatch[2]) : null;
+        if (sortMatch && sortRelField) {
+            const relPresentableFields =
+                $collections
+                    ?.find((c) => c.id == sortRelField.options?.collectionId)
+                    ?.schema?.filter((f) => f.presentable)
+                    ?.map((f) => f.name) || [];
+
             const parts = [];
-            for (const displayField of relField.options.displayFields) {
-                parts.push((sortMatch[1] || "") + sortMatch[2] + "." + displayField);
+            for (const presentableField of relPresentableFields) {
+                parts.push((sortMatch[1] || "") + sortMatch[2] + "." + presentableField);
             }
-            listSort = parts.join(",");
+            if (parts.length > 0) {
+                listSort = parts.join(",");
+            }
         }
 
         const fallbackSearchFields = CommonHelper.getAllCollectionIdentifiers(collection);
 
+        const listFields = editorFields
+            .map((f) => f.name + ":excerpt(200)")
+            .concat(relFields.map((field) => "expand." + field.name + ".*:excerpt(200)"));
+        if (listFields.length) {
+            listFields.unshift("*");
+        }
+
         return ApiClient.collection(collection.id)
-            .getList(page, 30, {
+            .getList(page, perPage, {
                 sort: listSort,
+                skipTotal: 1,
                 filter: CommonHelper.normalizeSearchFilter(filter, fallbackSearchFields),
                 expand: relFields.map((field) => field.name).join(","),
-                $cancelKey: "records_list",
+                fields: listFields.join(","),
+                requestKey: "records_list",
             })
             .then(async (result) => {
                 if (page <= 1) {
@@ -142,23 +180,37 @@
 
                 isLoading = false;
                 currentPage = result.page;
-                totalRecords = result.totalItems;
+                lastTotal = result.items.length;
                 dispatch("load", records.concat(result.items));
+
+                // mark the records as "partial" because of the excerpt
+                if (editorFields.length) {
+                    for (let record of result.items) {
+                        record._partial = true;
+                    }
+                }
 
                 // optimize the records listing by rendering the rows in task batches
                 if (breakTasks) {
                     const currentYieldId = ++yieldedRecordsId;
-                    while (result.items.length) {
+                    while (result.items?.length) {
                         if (yieldedRecordsId != currentYieldId) {
-                            break; // new yeild has been started
+                            break; // new yield has been started
                         }
 
-                        records = records.concat(result.items.splice(0, 15));
+                        const subset = result.items.splice(0, 20);
+                        for (let item of subset) {
+                            CommonHelper.pushOrReplaceByKey(records, item);
+                        }
+                        records = records;
 
                         await CommonHelper.yieldToMain();
                     }
                 } else {
-                    records = records.concat(result.items);
+                    for (let item of result.items) {
+                        CommonHelper.pushOrReplaceByKey(records, item);
+                    }
+                    records = records;
                 }
             })
             .catch((err) => {
@@ -166,15 +218,16 @@
                     isLoading = false;
                     console.warn(err);
                     clearList();
-                    ApiClient.error(err, false);
+                    ApiClient.error(err, !filter || err?.status != 400); // silence filter errors
                 }
             });
     }
 
     function clearList() {
+        scrollWrapper?.resetVerticalScroll();
         records = [];
         currentPage = 1;
-        totalRecords = 0;
+        lastTotal = 0;
         bulkSelected = {};
     }
 
@@ -230,8 +283,11 @@
         return Promise.all(promises)
             .then(() => {
                 addSuccessToast(
-                    `Successfully deleted the selected ${totalBulkSelected === 1 ? "record" : "records"}.`
+                    `Successfully deleted the selected ${totalBulkSelected === 1 ? "record" : "records"}.`,
                 );
+
+                dispatch("delete", bulkSelected);
+
                 deselectAllRecords();
             })
             .catch((err) => {
@@ -262,7 +318,7 @@
     }
 </script>
 
-<HorizontalScroller class="table-wrapper">
+<Scroller bind:this={scrollWrapper} class="table-wrapper">
     <svelte:fragment slot="before">
         {#if columnsTrigger}
             <Toggler
@@ -295,7 +351,7 @@
     <table class="table" class:table-loading={isLoading}>
         <thead>
             <tr>
-                {#if !collection.$isView}
+                {#if !isView}
                     <th class="bulk-select-col min-width">
                         {#if isLoading}
                             <span class="loader loader-sm" />
@@ -323,7 +379,7 @@
                     </SortHeader>
                 {/if}
 
-                {#if collection.$isAuth}
+                {#if isAuth}
                     {#if !hiddenColumns.includes("@username")}
                         <SortHeader class="col-type-text col-field-id" name="username" bind:sort>
                             <div class="col-header-content">
@@ -388,7 +444,7 @@
             </tr>
         </thead>
         <tbody>
-            {#each records as record (!collection.$isView ? record.id : record)}
+            {#each records as record (!isView ? record.id : record)}
                 <tr
                     tabindex="0"
                     class="row-handle"
@@ -400,9 +456,10 @@
                         }
                     }}
                 >
-                    {#if !collection.$isView}
+                    {#if !isView}
                         <td class="bulk-select-col min-width">
                             <!-- svelte-ignore a11y-click-events-have-key-events -->
+                            <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <div class="form-field" on:click|stopPropagation>
                                 <input
                                     type="checkbox"
@@ -420,10 +477,10 @@
                             <div class="flex flex-gap-5">
                                 <div class="label">
                                     <CopyIcon value={record.id} />
-                                    <div class="txt">{record.id}</div>
+                                    <div class="txt txt-ellipsis">{record.id}</div>
                                 </div>
 
-                                {#if collection.$isAuth}
+                                {#if isAuth}
                                     {#if record.verified}
                                         <i
                                             class="ri-checkbox-circle-fill txt-sm txt-success"
@@ -440,7 +497,7 @@
                         </td>
                     {/if}
 
-                    {#if collection.$isAuth}
+                    {#if isAuth}
                         {#if !hiddenColumns.includes("@username")}
                             <td class="col-type-text col-field-username">
                                 {#if CommonHelper.isEmpty(record.username)}
@@ -506,7 +563,7 @@
                                 >
                                     <span class="txt">Clear filters</span>
                                 </button>
-                            {:else if !collection?.$isView}
+                            {:else if !isView}
                                 <button
                                     type="button"
                                     class="btn btn-secondary btn-expanded m-t-sm"
@@ -520,30 +577,27 @@
                     </tr>
                 {/if}
             {/each}
+
+            {#if records.length && canLoadMore}
+                <tr>
+                    <td colspan="99" class="txt-center">
+                        <button
+                            class="btn btn-expanded-lg btn-secondary btn-horizontal-sticky"
+                            disabled={isLoading}
+                            class:btn-loading={isLoading}
+                            on:click|preventDefault={() => load(currentPage + 1)}
+                        >
+                            <span class="txt">Load more</span>
+                        </button>
+                    </td>
+                </tr>
+            {/if}
         </tbody>
     </table>
-</HorizontalScroller>
-
-{#if records.length}
-    <small class="block txt-hint txt-right m-t-sm">Showing {records.length} of {totalRecords}</small>
-{/if}
-
-{#if records.length && canLoadMore}
-    <div class="block txt-center m-t-xs">
-        <button
-            type="button"
-            class="btn btn-lg btn-secondary btn-expanded"
-            class:btn-loading={isLoading}
-            class:btn-disabled={isLoading}
-            on:click={() => load(currentPage + 1)}
-        >
-            <span class="txt">Load more ({totalRecords - records.length})</span>
-        </button>
-    </div>
-{/if}
+</Scroller>
 
 {#if totalBulkSelected}
-    <div class="bulkbar" transition:fly|local={{ duration: 150, y: 5 }}>
+    <div class="bulkbar" transition:fly={{ duration: 150, y: 5 }}>
         <div class="txt">
             Selected <strong>{totalBulkSelected}</strong>
             {totalBulkSelected === 1 ? "record" : "records"}

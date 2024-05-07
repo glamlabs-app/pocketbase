@@ -6,7 +6,7 @@
     export let key = "";
 </script>
 
-<SchemaField bind:field {key} on:rename on:remove {...$$restProps}>
+<SchemaField bind:field {key} on:rename on:remove on:duplicate {...$$restProps}>
     <svelte:fragment slot="options">
         <div class="grid grid-sm">
             <div class="col-sm-3">
@@ -35,7 +35,7 @@
                     <input
                         type="text"
                         id={uniqueId}
-                        placeholder={"Valid Go regular expression, eg. ^w+$"}
+                        placeholder={"Valid Go regular expression, eg. ^\\w+$"}
                         bind:value={field.options.pattern}
                     />
                 </Field>

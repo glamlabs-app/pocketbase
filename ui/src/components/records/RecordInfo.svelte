@@ -5,19 +5,38 @@
     import RecordFileThumb from "@/components/records/RecordFileThumb.svelte";
 
     export let record;
-    export let displayFields = [];
+
+    let fileDisplayFields = [];
+    let nonFileDisplayFields = [];
 
     $: collection = $collections?.find((item) => item.id == record?.collectionId);
 
-    $: fileDisplayFields =
-        displayFields?.filter((name) => {
-            return !!collection?.schema?.find((field) => field.name == name && field.type == "file");
-        }) || [];
+    $: if (collection) {
+        loadDisplayFields();
+    }
 
-    $: textDisplayFields =
-        (!fileDisplayFields.length
-            ? displayFields
-            : displayFields?.filter((name) => !fileDisplayFields.includes(name))) || [];
+    function loadDisplayFields() {
+        const fields = collection?.schema || [];
+
+        // reset
+        fileDisplayFields = fields.filter((f) => f.presentable && f.type == "file").map((f) => f.name);
+        nonFileDisplayFields = fields.filter((f) => f.presentable && f.type != "file").map((f) => f.name);
+
+        // fallback to the first single file field that accept images
+        // if no presentable field is available
+        if (!fileDisplayFields.length && !nonFileDisplayFields.length) {
+            const fallbackFileField = fields.find((f) => {
+                return (
+                    f.type == "file" &&
+                    f.options?.maxSelect == 1 &&
+                    f.options?.mimeTypes?.find((t) => t.startsWith("image/"))
+                );
+            });
+            if (fallbackFileField) {
+                fileDisplayFields.push(fallbackFileField.name);
+            }
+        }
+    }
 </script>
 
 <div class="record-info">
@@ -27,7 +46,7 @@
             text: CommonHelper.truncate(
                 JSON.stringify(CommonHelper.truncateObject(record), null, 2),
                 800,
-                true
+                true,
             ),
             class: "code",
             position: "left",
@@ -44,7 +63,7 @@
     {/each}
 
     <span class="txt txt-ellipsis">
-        {CommonHelper.truncate(CommonHelper.displayValue(record, textDisplayFields), 70)}
+        {CommonHelper.truncate(CommonHelper.displayValue(record, nonFileDisplayFields), 70)}
     </span>
 </div>
 
@@ -56,10 +75,6 @@
         max-width: 100%;
         min-width: 0;
         gap: 5px;
-        line-height: normal;
-        > * {
-            line-height: inherit;
-        }
         :global(.thumb) {
             box-shadow: none;
         }

@@ -1,6 +1,7 @@
 package apis_test
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -10,11 +11,16 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/rest"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 func TestRecordCrudList(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "missing collection",
@@ -41,9 +47,16 @@ func TestRecordCrudList(t *testing.T) {
 			ExpectedContent: []string{`"data":{}`},
 		},
 		{
-			Name:            "public collection but with admin only filter/sort (aka. @collection)",
+			Name:            "public collection but with admin only filter param (aka. @collection, @request, etc.)",
 			Method:          http.MethodGet,
-			Url:             "/api/collections/demo2/records?filter=@collection.demo2.title='test1'",
+			Url:             "/api/collections/demo2/records?filter=%40collection.demo2.title='test1'",
+			ExpectedStatus:  403,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:            "public collection but with admin only sort param (aka. @collection, @request, etc.)",
+			Method:          http.MethodGet,
+			Url:             "/api/collections/demo2/records?sort=@request.auth.title",
 			ExpectedStatus:  403,
 			ExpectedContent: []string{`"data":{}`},
 		},
@@ -460,6 +473,22 @@ func TestRecordCrudList(t *testing.T) {
 			},
 			ExpectedEvents: map[string]int{"OnRecordsListRequest": 1},
 		},
+		{
+			Name:           "view collection with numeric ids",
+			Method:         http.MethodGet,
+			Url:            "/api/collections/numeric_id_view/records",
+			ExpectedStatus: 200,
+			ExpectedContent: []string{
+				`"page":1`,
+				`"perPage":30`,
+				`"totalPages":1`,
+				`"totalItems":2`,
+				`"items":[{`,
+				`"id":"1"`,
+				`"id":"2"`,
+			},
+			ExpectedEvents: map[string]int{"OnRecordsListRequest": 1},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -468,6 +497,8 @@ func TestRecordCrudList(t *testing.T) {
 }
 
 func TestRecordCrudView(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "missing collection",
@@ -729,6 +760,16 @@ func TestRecordCrudView(t *testing.T) {
 			},
 			ExpectedEvents: map[string]int{"OnRecordViewRequest": 1},
 		},
+		{
+			Name:           "view record with numeric id",
+			Method:         http.MethodGet,
+			Url:            "/api/collections/numeric_id_view/records/1",
+			ExpectedStatus: 200,
+			ExpectedContent: []string{
+				`"id":"1"`,
+			},
+			ExpectedEvents: map[string]int{"OnRecordViewRequest": 1},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -737,6 +778,8 @@ func TestRecordCrudView(t *testing.T) {
 }
 
 func TestRecordCrudDelete(t *testing.T) {
+	t.Parallel()
+
 	ensureDeletedFiles := func(app *tests.TestApp, collectionId string, recordId string) {
 		storageDir := filepath.Join(app.DataDir(), "storage", collectionId, recordId)
 
@@ -837,6 +880,27 @@ func TestRecordCrudDelete(t *testing.T) {
 			},
 		},
 		{
+			Name:   "OnRecordAfterDeleteRequest error response",
+			Method: http.MethodDelete,
+			Url:    "/api/collections/clients/records/o1y0dd0spd786md",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnRecordAfterDeleteRequest().Add(func(e *core.RecordDeleteEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnModelAfterDelete":          1,
+				"OnModelBeforeDelete":         1,
+				"OnRecordAfterDeleteRequest":  1,
+				"OnRecordBeforeDeleteRequest": 1,
+			},
+		},
+		{
 			Name:   "authenticated record that match the collection delete rule",
 			Method: http.MethodDelete,
 			Url:    "/api/collections/users/records/4q1xlclmfloku33",
@@ -854,7 +918,7 @@ func TestRecordCrudDelete(t *testing.T) {
 				"OnRecordAfterDeleteRequest":  1,
 				"OnRecordBeforeDeleteRequest": 1,
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				ensureDeletedFiles(app, "_pb_users_auth_", "4q1xlclmfloku33")
 
 				// check if all the external auths records were deleted
@@ -941,7 +1005,7 @@ func TestRecordCrudDelete(t *testing.T) {
 				"OnRecordBeforeDeleteRequest": 1,
 				"OnRecordAfterDeleteRequest":  1,
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				recId := "84nmscqy84lsi1t"
 				rec, _ := app.Dao().FindRecordById("demo1", recId, nil)
 				if rec != nil {
@@ -959,11 +1023,27 @@ func TestRecordCrudDelete(t *testing.T) {
 }
 
 func TestRecordCrudCreate(t *testing.T) {
+	t.Parallel()
+
 	formData, mp, err := tests.MockMultipartData(map[string]string{
 		"title": "title_test",
 	}, "files")
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	formData2, mp2, err2 := tests.MockMultipartData(map[string]string{
+		rest.MultipartJsonKey: `{"title": "title_test2", "testPayload": 123}`,
+	}, "files")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+
+	formData3, mp3, err3 := tests.MockMultipartData(map[string]string{
+		rest.MultipartJsonKey: `{"title": "title_test3", "testPayload": 123}`,
+	}, "files")
+	if err3 != nil {
+		t.Fatal(err3)
 	}
 
 	scenarios := []tests.ApiScenario{
@@ -1174,6 +1254,60 @@ func TestRecordCrudCreate(t *testing.T) {
 			},
 		},
 		{
+			Name:   "submit via multipart form data with @jsonPayload key and unsatisfied @request.data rule",
+			Method: http.MethodPost,
+			Url:    "/api/collections/demo3/records",
+			Body:   formData2,
+			RequestHeaders: map[string]string{
+				"Content-Type": mp2.FormDataContentType(),
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				collection, err := app.Dao().FindCollectionByNameOrId("demo3")
+				if err != nil {
+					t.Fatalf("failed to find demo3 collection: %v", err)
+				}
+				collection.CreateRule = types.Pointer("@request.data.testPayload != 123")
+				if err := app.Dao().WithoutHooks().SaveCollection(collection); err != nil {
+					t.Fatalf("failed to update demo3 collection create rule: %v", err)
+				}
+				core.ReloadCachedCollections(app)
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:   "submit via multipart form data with @jsonPayload key and satisfied @request.data rule",
+			Method: http.MethodPost,
+			Url:    "/api/collections/demo3/records",
+			Body:   formData3,
+			RequestHeaders: map[string]string{
+				"Content-Type": mp3.FormDataContentType(),
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				collection, err := app.Dao().FindCollectionByNameOrId("demo3")
+				if err != nil {
+					t.Fatalf("failed to find demo3 collection: %v", err)
+				}
+				collection.CreateRule = types.Pointer("@request.data.testPayload = 123")
+				if err := app.Dao().WithoutHooks().SaveCollection(collection); err != nil {
+					t.Fatalf("failed to update demo3 collection create rule: %v", err)
+				}
+				core.ReloadCachedCollections(app)
+			},
+			ExpectedStatus: 200,
+			ExpectedContent: []string{
+				`"id":"`,
+				`"title":"title_test3"`,
+				`"files":["`,
+			},
+			ExpectedEvents: map[string]int{
+				"OnRecordBeforeCreateRequest": 1,
+				"OnRecordAfterCreateRequest":  1,
+				"OnModelBeforeCreate":         1,
+				"OnModelAfterCreate":          1,
+			},
+		},
+		{
 			Name:   "unique field error check",
 			Method: http.MethodPost,
 			Url:    "/api/collections/demo2/records",
@@ -1185,6 +1319,25 @@ func TestRecordCrudCreate(t *testing.T) {
 				`"data":{`,
 				`"title":{`,
 				`"code":"validation_not_unique"`,
+			},
+		},
+		{
+			Name:   "OnRecordAfterCreateRequest error response",
+			Method: http.MethodPost,
+			Url:    "/api/collections/demo2/records",
+			Body:   strings.NewReader(`{"title":"new"}`),
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnRecordAfterCreateRequest().Add(func(e *core.RecordCreateEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnRecordBeforeCreateRequest": 1,
+				"OnRecordAfterCreateRequest":  1,
+				"OnModelBeforeCreate":         1,
+				"OnModelAfterCreate":          1,
 			},
 		},
 
@@ -1516,11 +1669,27 @@ func TestRecordCrudCreate(t *testing.T) {
 }
 
 func TestRecordCrudUpdate(t *testing.T) {
+	t.Parallel()
+
 	formData, mp, err := tests.MockMultipartData(map[string]string{
 		"title": "title_test",
 	}, "files")
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	formData2, mp2, err2 := tests.MockMultipartData(map[string]string{
+		rest.MultipartJsonKey: `{"title": "title_test2", "testPayload": 123}`,
+	}, "files")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+
+	formData3, mp3, err3 := tests.MockMultipartData(map[string]string{
+		rest.MultipartJsonKey: `{"title": "title_test3", "testPayload": 123}`,
+	}, "files")
+	if err3 != nil {
+		t.Fatal(err3)
 	}
 
 	scenarios := []tests.ApiScenario{
@@ -1746,6 +1915,79 @@ func TestRecordCrudUpdate(t *testing.T) {
 			},
 		},
 		{
+			Name:   "submit via multipart form data with @jsonPayload key and unsatisfied @request.data rule",
+			Method: http.MethodPatch,
+			Url:    "/api/collections/demo3/records/mk5fmymtx4wsprk",
+			Body:   formData2,
+			RequestHeaders: map[string]string{
+				"Content-Type": mp2.FormDataContentType(),
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				collection, err := app.Dao().FindCollectionByNameOrId("demo3")
+				if err != nil {
+					t.Fatalf("failed to find demo3 collection: %v", err)
+				}
+				collection.UpdateRule = types.Pointer("@request.data.testPayload != 123")
+				if err := app.Dao().WithoutHooks().SaveCollection(collection); err != nil {
+					t.Fatalf("failed to update demo3 collection update rule: %v", err)
+				}
+				core.ReloadCachedCollections(app)
+			},
+			ExpectedStatus:  404,
+			ExpectedContent: []string{`"data":{}`},
+		},
+		{
+			Name:   "submit via multipart form data with @jsonPayload key and satisfied @request.data rule",
+			Method: http.MethodPatch,
+			Url:    "/api/collections/demo3/records/mk5fmymtx4wsprk",
+			Body:   formData3,
+			RequestHeaders: map[string]string{
+				"Content-Type": mp3.FormDataContentType(),
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				collection, err := app.Dao().FindCollectionByNameOrId("demo3")
+				if err != nil {
+					t.Fatalf("failed to find demo3 collection: %v", err)
+				}
+				collection.UpdateRule = types.Pointer("@request.data.testPayload = 123")
+				if err := app.Dao().WithoutHooks().SaveCollection(collection); err != nil {
+					t.Fatalf("failed to update demo3 collection update rule: %v", err)
+				}
+				core.ReloadCachedCollections(app)
+			},
+			ExpectedStatus: 200,
+			ExpectedContent: []string{
+				`"id":"mk5fmymtx4wsprk"`,
+				`"title":"title_test3"`,
+				`"files":["`,
+			},
+			ExpectedEvents: map[string]int{
+				"OnRecordBeforeUpdateRequest": 1,
+				"OnRecordAfterUpdateRequest":  1,
+				"OnModelBeforeUpdate":         1,
+				"OnModelAfterUpdate":          1,
+			},
+		},
+		{
+			Name:   "OnRecordAfterUpdateRequest error response",
+			Method: http.MethodPatch,
+			Url:    "/api/collections/demo2/records/0yxhwia2amd8gec",
+			Body:   strings.NewReader(`{"title":"new"}`),
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnRecordAfterUpdateRequest().Add(func(e *core.RecordUpdateEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnRecordBeforeUpdateRequest": 1,
+				"OnRecordAfterUpdateRequest":  1,
+				"OnModelBeforeUpdate":         1,
+				"OnModelAfterUpdate":          1,
+			},
+		},
+		{
 			Name:   "try to change the id of an existing record",
 			Method: http.MethodPatch,
 			Url:    "/api/collections/demo3/records/mk5fmymtx4wsprk",
@@ -1945,7 +2187,7 @@ func TestRecordCrudUpdate(t *testing.T) {
 				"OnRecordAfterUpdateRequest":  1,
 				"OnRecordBeforeUpdateRequest": 1,
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				record, _ := app.Dao().FindRecordById("nologin", "phhq3wr65cap535")
 				if !record.ValidatePassword("12345678") {
 					t.Fatal("Password update failed.")
@@ -1988,7 +2230,7 @@ func TestRecordCrudUpdate(t *testing.T) {
 				"OnRecordAfterUpdateRequest":  1,
 				"OnRecordBeforeUpdateRequest": 1,
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				record, _ := app.Dao().FindRecordById("users", "oap640cot4yru2s")
 				if !record.ValidatePassword("12345678") {
 					t.Fatal("Password update failed.")
@@ -2050,7 +2292,7 @@ func TestRecordCrudUpdate(t *testing.T) {
 				"OnRecordAfterUpdateRequest":  1,
 				"OnRecordBeforeUpdateRequest": 1,
 			},
-			AfterTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+			AfterTestFunc: func(t *testing.T, app *tests.TestApp, res *http.Response) {
 				record, _ := app.Dao().FindRecordById("nologin", "dc49k6jgejn40h3")
 				if !record.ValidatePassword("123456789") {
 					t.Fatal("Password update failed.")

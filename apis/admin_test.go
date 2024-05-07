@@ -1,6 +1,7 @@
 package apis_test
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tests"
@@ -15,6 +17,8 @@ import (
 )
 
 func TestAdminAuthWithPassword(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "empty data",
@@ -89,6 +93,26 @@ func TestAdminAuthWithPassword(t *testing.T) {
 				"OnAdminAuthRequest":                   1,
 			},
 		},
+		{
+			Name:   "OnAdminAfterAuthWithPasswordRequest error response",
+			Method: http.MethodPost,
+			Url:    "/api/admins/auth-with-password",
+			Body:   strings.NewReader(`{"identity":"test@example.com","password":"1234567890"}`),
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4MTYwMH0.han3_sG65zLddpcX2ic78qgy7FKecuPfOpFa8Dvi5Bg",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnAdminAfterAuthWithPasswordRequest().Add(func(e *core.AdminAuthWithPasswordEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnAdminBeforeAuthWithPasswordRequest": 1,
+				"OnAdminAfterAuthWithPasswordRequest":  1,
+			},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -97,6 +121,8 @@ func TestAdminAuthWithPassword(t *testing.T) {
 }
 
 func TestAdminRequestPasswordReset(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "empty data",
@@ -166,6 +192,8 @@ func TestAdminRequestPasswordReset(t *testing.T) {
 }
 
 func TestAdminConfirmPasswordReset(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "empty data",
@@ -224,6 +252,29 @@ func TestAdminConfirmPasswordReset(t *testing.T) {
 				"OnAdminAfterConfirmPasswordResetRequest":  1,
 			},
 		},
+		{
+			Name:   "OnAdminAfterConfirmPasswordResetRequest error response",
+			Method: http.MethodPost,
+			Url:    "/api/admins/confirm-password-reset",
+			Body: strings.NewReader(`{
+				"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImV4cCI6MjIwODk4MTYwMH0.kwFEler6KSMKJNstuaSDvE1QnNdCta5qSnjaIQ0hhhc",
+				"password":"1234567891",
+				"passwordConfirm":"1234567891"
+			}`),
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnAdminAfterConfirmPasswordResetRequest().Add(func(e *core.AdminConfirmPasswordResetEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnModelBeforeUpdate":                      1,
+				"OnModelAfterUpdate":                       1,
+				"OnAdminBeforeConfirmPasswordResetRequest": 1,
+				"OnAdminAfterConfirmPasswordResetRequest":  1,
+			},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -232,6 +283,8 @@ func TestAdminConfirmPasswordReset(t *testing.T) {
 }
 
 func TestAdminRefresh(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -278,6 +331,25 @@ func TestAdminRefresh(t *testing.T) {
 				"OnAdminAfterAuthRefreshRequest":  1,
 			},
 		},
+		{
+			Name:   "OnAdminAfterAuthRefreshRequest error response",
+			Method: http.MethodPost,
+			Url:    "/api/admins/auth-refresh",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnAdminAfterAuthRefreshRequest().Add(func(e *core.AdminAuthRefreshEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnAdminBeforeAuthRefreshRequest": 1,
+				"OnAdminAfterAuthRefreshRequest":  1,
+			},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -286,6 +358,8 @@ func TestAdminRefresh(t *testing.T) {
 }
 
 func TestAdminsList(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -389,6 +463,8 @@ func TestAdminsList(t *testing.T) {
 }
 
 func TestAdminView(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -444,6 +520,8 @@ func TestAdminView(t *testing.T) {
 }
 
 func TestAdminDelete(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -510,6 +588,27 @@ func TestAdminDelete(t *testing.T) {
 				"OnAdminBeforeDeleteRequest": 1,
 			},
 		},
+		{
+			Name:   "OnAdminAfterDeleteRequest error response",
+			Method: http.MethodDelete,
+			Url:    "/api/admins/sbmbsdb40jyxf7h",
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnAdminAfterDeleteRequest().Add(func(e *core.AdminDeleteEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnModelBeforeDelete":        1,
+				"OnModelAfterDelete":         1,
+				"OnAdminBeforeDeleteRequest": 1,
+				"OnAdminAfterDeleteRequest":  1,
+			},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -518,6 +617,8 @@ func TestAdminDelete(t *testing.T) {
 }
 
 func TestAdminCreate(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized (while having at least 1 existing admin)",
@@ -637,6 +738,33 @@ func TestAdminCreate(t *testing.T) {
 				"OnAdminAfterCreateRequest":  1,
 			},
 		},
+		{
+			Name:   "OnAdminAfterCreateRequest error response",
+			Method: http.MethodPost,
+			Url:    "/api/admins",
+			Body: strings.NewReader(`{
+				"email":"testnew@example.com",
+				"password":"1234567890",
+				"passwordConfirm":"1234567890",
+				"avatar":3
+			}`),
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnAdminAfterCreateRequest().Add(func(e *core.AdminCreateEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
+			ExpectedEvents: map[string]int{
+				"OnModelBeforeCreate":        1,
+				"OnModelAfterCreate":         1,
+				"OnAdminBeforeCreateRequest": 1,
+				"OnAdminAfterCreateRequest":  1,
+			},
+		},
 	}
 
 	for _, scenario := range scenarios {
@@ -645,6 +773,8 @@ func TestAdminCreate(t *testing.T) {
 }
 
 func TestAdminUpdate(t *testing.T) {
+	t.Parallel()
+
 	scenarios := []tests.ApiScenario{
 		{
 			Name:            "unauthorized",
@@ -729,6 +859,7 @@ func TestAdminUpdate(t *testing.T) {
 			},
 		},
 		{
+			Name:   "authorized as admin + valid data",
 			Method: http.MethodPatch,
 			Url:    "/api/admins/sbmbsdb40jyxf7h",
 			Body: strings.NewReader(`{
@@ -752,6 +883,33 @@ func TestAdminUpdate(t *testing.T) {
 				`"tokenKey"`,
 				`"passwordHash"`,
 			},
+			ExpectedEvents: map[string]int{
+				"OnModelBeforeUpdate":        1,
+				"OnModelAfterUpdate":         1,
+				"OnAdminBeforeUpdateRequest": 1,
+				"OnAdminAfterUpdateRequest":  1,
+			},
+		},
+		{
+			Name:   "OnAdminAfterUpdateRequest error response",
+			Method: http.MethodPatch,
+			Url:    "/api/admins/sbmbsdb40jyxf7h",
+			Body: strings.NewReader(`{
+				"email":"testnew@example.com",
+				"password":"1234567891",
+				"passwordConfirm":"1234567891",
+				"avatar":5
+			}`),
+			RequestHeaders: map[string]string{
+				"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InN5d2JoZWNuaDQ2cmhtMCIsInR5cGUiOiJhZG1pbiIsImV4cCI6MjIwODk4NTI2MX0.M1m--VOqGyv0d23eeUc0r9xE8ZzHaYVmVFw1VZW6gT8",
+			},
+			BeforeTestFunc: func(t *testing.T, app *tests.TestApp, e *echo.Echo) {
+				app.OnAdminAfterUpdateRequest().Add(func(e *core.AdminUpdateEvent) error {
+					return errors.New("error")
+				})
+			},
+			ExpectedStatus:  400,
+			ExpectedContent: []string{`"data":{}`},
 			ExpectedEvents: map[string]int{
 				"OnModelBeforeUpdate":        1,
 				"OnModelAfterUpdate":         1,

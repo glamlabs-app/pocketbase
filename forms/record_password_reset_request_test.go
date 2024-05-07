@@ -13,6 +13,8 @@ import (
 )
 
 func TestRecordPasswordResetRequestSubmit(t *testing.T) {
+	t.Parallel()
+
 	testApp, _ := tests.NewTestApp()
 	defer testApp.Cleanup()
 
@@ -116,6 +118,8 @@ func TestRecordPasswordResetRequestSubmit(t *testing.T) {
 }
 
 func TestRecordPasswordResetRequestInterceptors(t *testing.T) {
+	t.Parallel()
+
 	testApp, _ := tests.NewTestApp()
 	defer testApp.Cleanup()
 
@@ -164,7 +168,7 @@ func TestRecordPasswordResetRequestInterceptors(t *testing.T) {
 		t.Fatalf("Expected interceptor2 to be called")
 	}
 
-	if interceptorLastResetSentAt.String() == authRecord.LastResetSentAt().String() {
-		t.Fatalf("Expected the form model to be filled before calling the interceptors")
+	if interceptorLastResetSentAt.String() != authRecord.LastResetSentAt().String() {
+		t.Fatalf("Expected the form model to NOT be filled before calling the interceptors")
 	}
 }

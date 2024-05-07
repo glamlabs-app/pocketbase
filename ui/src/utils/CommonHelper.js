@@ -1,8 +1,8 @@
 import { DateTime } from "luxon";
 
 const imageExtensions = [
-   ".jpg", ".jpeg", ".png", ".svg",
-   ".gif", ".jfif", ".webp", ".avif",
+    ".jpg", ".jpeg", ".png", ".svg",
+    ".gif", ".jfif", ".webp", ".avif",
 ];
 
 const videoExtensions = [
@@ -18,6 +18,34 @@ const documentExtensions = [
     ".pdf", ".doc", ".docx", ".xls",
     ".xlsx", ".ppt", ".pptx", ".odp",
     ".odt", ".ods", ".txt",
+];
+
+export const logLevels = [
+    // {
+    //     level: -8,
+    //     label: "TRACE",
+    //     class: "",
+    // },
+    {
+        level: -4,
+        label: "DEBUG",
+        class: "",
+    },
+    {
+        level: 0,
+        label: "INFO",
+        class: "label-success",
+    },
+    {
+        level: 4,
+        label: "WARN",
+        class: "label-warning",
+    },
+    {
+        level: 8,
+        label: "ERROR",
+        class: "label-danger",
+    },
 ];
 
 export default class CommonHelper {
@@ -39,6 +67,36 @@ export default class CommonHelper {
      */
     static clone(value) {
         return typeof structuredClone !== "undefined" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+    }
+
+    /**
+     * Returns the zero/empty value of val (only primitive values are supported).
+     * @param  {Mixed} val
+     * @return {Mixed}
+     */
+    static zeroValue(val) {
+        switch (typeof val) {
+            case "string":
+                return "";
+            case "number":
+                return 0;
+            case "boolean":
+                return false;
+            case "object":
+                if (val === null) {
+                    return null;
+                }
+
+                if (Array.isArray(val)) {
+                    return [];
+                }
+
+                return {};
+            case "undefined":
+                return undefined;
+            default:
+                return null;
+        }
     }
 
     /**
@@ -79,7 +137,7 @@ export default class CommonHelper {
             tagName === "input" ||
             tagName === "select" ||
             tagName === "textarea" ||
-            element.isContentEditable
+            element?.isContentEditable
         )
     }
 
@@ -97,7 +155,7 @@ export default class CommonHelper {
             tagName === "button" ||
             tagName === "a" ||
             tagName === "details" ||
-            element.tabIndex >= 0
+            element?.tabIndex >= 0
         );
     }
 
@@ -313,7 +371,7 @@ export default class CommonHelper {
      */
     static getNestedVal(data, path, defaultVal = null, delimiter = ".") {
         let result = data || {};
-        let parts  = (path || "").split(delimiter);
+        let parts = (path || "").split(delimiter);
 
         for (const part of parts) {
             if (
@@ -348,8 +406,8 @@ export default class CommonHelper {
             return
         }
 
-        let result   = data;
-        let parts    = path.split(delimiter);
+        let result = data;
+        let parts = path.split(delimiter);
         let lastPart = parts.pop();
 
         for (const part of parts) {
@@ -381,8 +439,8 @@ export default class CommonHelper {
      * @param  {String}       delimiter
      */
     static deleteByPath(data, path, delimiter = ".") {
-        let result   = data || {};
-        let parts    = (path || "").split(delimiter);
+        let result = data || {};
+        let parts = (path || "").split(delimiter);
         let lastPart = parts.pop();
 
         for (const part of parts) {
@@ -419,19 +477,43 @@ export default class CommonHelper {
     }
 
     /**
-     * Generates random string (suitable for elements id and keys).
+     * Generates pseudo-random string (suitable for elements id and keys).
      *
      * @param  {Number} [length] Results string length (default 10)
      * @return {String}
      */
-    static randomString(length) {
-        length = length || 10;
-
+    static randomString(length = 10) {
         let result = "";
         let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
         for (let i = 0; i < length; i++) {
             result += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+        }
+
+        return result;
+    }
+
+    /**
+     * Generates cryptographically random secret string
+     * (if crypto is supported, otherwise fallback to randomString).
+     *
+     * @param  {Number} [length] Results string length (default 15)
+     * @return {String}
+     */
+    static randomSecret(length = 15) {
+        if (typeof crypto === "undefined") {
+            return CommonHelper.randomString(length)
+        }
+
+        const arr = new Uint8Array(length);
+        crypto.getRandomValues(arr);
+
+        const alphabet = "-_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"; // 64 to devide "cleanly" 256
+
+        let result = "";
+
+        for (let i = 0; i < length; i++) {
+            result += alphabet.charAt(arr[i] % alphabet.length);
         }
 
         return result;
@@ -478,8 +560,8 @@ export default class CommonHelper {
     static trimQuotedValue(val) {
         if (
             typeof val == "string" &&
-            (val[0] == `"`  || val[0] == `'` || val[0] == "`") &&
-            val[0] == val[val.length-1]
+            (val[0] == `"` || val[0] == `'` || val[0] == "`") &&
+            val[0] == val[val.length - 1]
         ) {
             return val.slice(1, -1);
         }
@@ -512,7 +594,7 @@ export default class CommonHelper {
      * @return {String}
      */
     static truncate(str, length = 150, dots = true) {
-        str = str || "";
+        str = ("" + str);
 
         if (str.length <= length) {
             return str;
@@ -614,7 +696,7 @@ export default class CommonHelper {
      * @return {String}
      */
     static escapeRegExp(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
     }
 
     /**
@@ -625,8 +707,14 @@ export default class CommonHelper {
      * @return {Array}
      */
     static splitNonEmpty(str, separator = ",") {
-        const items = (str || "").split(separator);
         const result = [];
+
+        const items = (str || "")
+            .replaceAll("\\" + separator, "{_PB_ESCAPED_}")
+            .split(separator)
+            .map((item) => {
+                return item.replaceAll("{_PB_ESCAPED_}", separator);
+            });
 
         for (let item of items) {
             item = item.trim();
@@ -646,12 +734,16 @@ export default class CommonHelper {
      * @return {Array}
      */
     static joinNonEmpty(items, separator = ", ") {
+        items = items || [];
+
         const result = [];
+
+        const trimmedSeparator = separator.length > 1 ? separator.trim() : separator;
 
         for (let item of items) {
             item = typeof item === "string" ? item.trim() : "";
             if (!CommonHelper.isEmpty(item)) {
-                result.push(item);
+                result.push(item.replaceAll(trimmedSeparator, "\\" + trimmedSeparator));
             }
         }
 
@@ -764,6 +856,7 @@ export default class CommonHelper {
         const tempLink = document.createElement("a");
         tempLink.setAttribute("href", url);
         tempLink.setAttribute("download", name);
+        tempLink.setAttribute("target", "_blank");
         tempLink.click();
         tempLink.remove();
     }
@@ -775,11 +868,15 @@ export default class CommonHelper {
      * @param {String} name The result file name.
      */
     static downloadJson(obj, name) {
-        const encodedObj = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(obj, null, 2));
-
         name = name.endsWith(".json") ? name : (name + ".json");
 
-        CommonHelper.download(encodedObj, name)
+        const blob = new Blob([JSON.stringify(obj, null, 2)], {
+            type: "application/json"
+        });
+
+        const url = window.URL.createObjectURL(blob);
+
+        CommonHelper.download(url, name)
     }
 
     /**
@@ -801,7 +898,7 @@ export default class CommonHelper {
             console.warn("Failed to parse JWT payload data.", err);
         }
 
-        return  {};
+        return {};
     }
 
     /**
@@ -811,6 +908,7 @@ export default class CommonHelper {
      * @return {Boolean}
      */
     static hasImageExtension(filename) {
+        filename = filename || "";
         return !!imageExtensions.find((ext) => filename.toLowerCase().endsWith(ext));
     }
 
@@ -821,6 +919,7 @@ export default class CommonHelper {
      * @return {Boolean}
      */
     static hasVideoExtension(filename) {
+        filename = filename || "";
         return !!videoExtensions.find((ext) => filename.toLowerCase().endsWith(ext));
     }
 
@@ -831,6 +930,7 @@ export default class CommonHelper {
      * @return {Boolean}
      */
     static hasAudioExtension(filename) {
+        filename = filename || "";
         return !!audioExtensions.find((ext) => filename.toLowerCase().endsWith(ext));
     }
 
@@ -841,6 +941,7 @@ export default class CommonHelper {
      * @return {Boolean}
      */
     static hasDocumentExtension(filename) {
+        filename = filename || "";
         return !!documentExtensions.find((ext) => filename.toLowerCase().endsWith(ext));
     }
 
@@ -871,10 +972,10 @@ export default class CommonHelper {
         return new Promise((resolve) => {
             let reader = new FileReader();
 
-            reader.onload = function(e) {
+            reader.onload = function (e) {
                 let img = new Image();
 
-                img.onload = function() {
+                img.onload = function () {
                     let canvas = document.createElement("canvas");
                     let ctx = canvas.getContext("2d");
                     let imgWidth = img.width;
@@ -944,25 +1045,28 @@ export default class CommonHelper {
     static dummyCollectionRecord(collection) {
         const fields = collection?.schema || [];
 
+        const isAuth = collection?.type === "auth";
+        const isView = collection?.type === "view";
+
         const dummy = {
             "id": "RECORD_ID",
             "collectionId": collection?.id,
             "collectionName": collection?.name,
         };
 
-        if (collection?.isAuth) {
+        if (isAuth) {
             dummy["username"] = "username123";
             dummy["verified"] = false;
             dummy["emailVisibility"] = true;
             dummy["email"] = "test@example.com";
         }
 
-        const hasCreated = !collection?.$isView || CommonHelper.extractColumnsFromQuery(collection?.options?.query).includes("created");
+        const hasCreated = !isView || CommonHelper.extractColumnsFromQuery(collection?.options?.query).includes("created");
         if (hasCreated) {
             dummy["created"] = "2022-01-01 01:00:00.123Z";
         }
 
-        const hasUpdated = !collection?.$isView || CommonHelper.extractColumnsFromQuery(collection?.options?.query).includes("updated");
+        const hasUpdated = !isView || CommonHelper.extractColumnsFromQuery(collection?.options?.query).includes("updated");
         if (hasUpdated) {
             dummy["updated"] = "2022-01-01 23:59:59.456Z";
         }
@@ -1229,7 +1333,7 @@ export default class CommonHelper {
     }
 
     /**
-     * Groups and sorts collections array by type (auth, base, view).
+     * Groups and sorts collections array by type (auth, base, view) and name.
      *
      * @param  {Array} collections
      * @return {Array}
@@ -1249,7 +1353,17 @@ export default class CommonHelper {
             }
         }
 
-        return [].concat(auth, base, view);
+        function sortNames(a, b) {
+            if (a.name > b.name) {
+                return 1
+            }
+            if (a.name < b.name) {
+                return -1
+            }
+            return 0;
+        }
+
+        return [].concat(auth.sort(sortNames), base.sort(sortNames), view.sort(sortNames));
     }
 
 
@@ -1288,6 +1402,43 @@ export default class CommonHelper {
      * @return {Object}
      */
     static defaultEditorOptions() {
+        const allowedPasteNodes = [
+            "DIV", "P", "A", "EM", "B", "STRONG",
+            "H1", "H2", "H3", "H4", "H5", "H6",
+            "TABLE", "TR", "TD", "TH", "TBODY", "THEAD", "TFOOT",
+            "BR", "HR", "Q", "SUP", "SUB", "DEL",
+            "IMG", "OL", "UL", "LI", "CODE",
+        ];
+
+        function unwrap(node) {
+            let parent = node.parentNode;
+
+            // move children outside of the parent node
+            while (node.firstChild) {
+                parent.insertBefore(node.firstChild, node);
+            }
+
+            // remove the now empty parent element
+            parent.removeChild(node);
+        }
+
+        function cleanupPastedNode(node) {
+            if (!node) {
+                return; // nothing to cleanup
+            }
+
+            for (const child of node.children) {
+                cleanupPastedNode(child);
+            }
+
+            if (!allowedPasteNodes.includes(node.tagName)) {
+                unwrap(node);
+            } else {
+                node.removeAttribute("style");
+                node.removeAttribute("class");
+            }
+        }
+
         return {
             branding: false,
             promotion: false,
@@ -1312,7 +1463,37 @@ export default class CommonHelper {
                 "codesample",
                 "directionality",
             ],
-            toolbar: "styles | alignleft aligncenter alignright | bold italic forecolor backcolor | bullist numlist | link image table codesample direction | code fullscreen",
+            codesample_global_prismjs: true,
+            codesample_languages: [
+                { text: 'HTML/XML', value: 'markup' },
+                { text: 'CSS', value: 'css' },
+                { text: 'SQL', value: 'sql' },
+                { text: 'JavaScript', value: 'javascript' },
+                { text: 'Go', value: 'go' },
+                { text: 'Dart', value: 'dart' },
+                { text: 'Zig', value: 'zig' },
+                { text: 'Rust', value: 'rust' },
+                { text: 'Lua', value: 'lua' },
+                { text: 'PHP', value: 'php' },
+                { text: 'Ruby', value: 'ruby' },
+                { text: 'Python', value: 'python' },
+                { text: 'Java', value: 'java' },
+                { text: 'C', value: 'c' },
+                { text: 'C#', value: 'csharp' },
+                { text: 'C++', value: 'cpp' },
+                // other non-highlighted languages
+                { text: 'Markdown', value: 'markdown' },
+                { text: 'Swift', value: 'swift' },
+                { text: 'Kotlin', value: 'kotlin' },
+                { text: 'Elixir', value: 'elixir' },
+                { text: 'Scala', value: 'scala' },
+                { text: 'Julia', value: 'julia' },
+                { text: 'Haskell', value: 'haskell' },
+            ],
+            toolbar: "styles | alignleft aligncenter alignright | bold italic forecolor backcolor | bullist numlist | link image_picker table codesample direction | code fullscreen",
+            paste_postprocess: (editor, args) => {
+                cleanupPastedNode(args.node);
+            },
             file_picker_types: "image",
             // @see https://www.tiny.cloud/docs/tinymce/6/file-image-upload/#interactive-example
             file_picker_callback: (cb, value, meta) => {
@@ -1377,7 +1558,7 @@ export default class CommonHelper {
                                 icon: "ltr",
                                 onAction: () => {
                                     window?.localStorage?.setItem(lastDirectionKey, "ltr");
-                                    tinymce.activeEditor.execCommand("mceDirectionLTR");
+                                    editor.execCommand("mceDirectionLTR");
                                 }
                             },
                             {
@@ -1386,7 +1567,7 @@ export default class CommonHelper {
                                 icon: "rtl",
                                 onAction: () => {
                                     window?.localStorage?.setItem(lastDirectionKey, "rtl");
-                                    tinymce.activeEditor.execCommand("mceDirectionRTL");
+                                    editor.execCommand("mceDirectionRTL");
                                 }
                             }
                         ];
@@ -1394,6 +1575,32 @@ export default class CommonHelper {
                         callback(items);
                     }
                 });
+
+                editor.ui.registry.addMenuButton("image_picker", {
+                    icon: "image",
+                    fetch: (callback) => {
+                        const items = [
+                            {
+                                type: "menuitem",
+                                text: "From collection",
+                                icon: "gallery",
+                                onAction: () => {
+                                    editor.dispatch("collections_file_picker", {})
+                                }
+                            },
+                            {
+                                type: "menuitem",
+                                text: "Inline",
+                                icon: "browse",
+                                onAction: () => {
+                                    editor.execCommand("mceImage");
+                                }
+                            }
+                        ];
+
+                        callback(items);
+                    }
+                })
             },
         };
     }
@@ -1401,8 +1608,10 @@ export default class CommonHelper {
     /**
      * Tries to output the first displayable field of the provided model.
      *
-     * @param  {Object} model
-     * @return {Any}
+     * @param  {Object}        model
+     * @param  {Array<string>} displayFields
+     * @param  {String}        [missingValue]
+     * @return {String}
      */
     static displayValue(model, displayFields, missingValue = "N/A") {
         model = model || {};
@@ -1410,8 +1619,8 @@ export default class CommonHelper {
 
         let result = [];
 
-        for (const field of displayFields) {
-            let val = model[field];
+        for (const prop of displayFields) {
+            let val = model[prop];
 
             if (typeof val === "undefined") {
                 continue
@@ -1432,10 +1641,12 @@ export default class CommonHelper {
             "slug",
             "email",
             "username",
+            "nickname",
             "label",
             "heading",
             "message",
             "key",
+            "identifier",
             "id",
         ];
 
@@ -1456,33 +1667,40 @@ export default class CommonHelper {
      * @param  {String} missingValue
      * @return {String}
      */
-    static stringifyValue(val, missingValue = "N/A") {
+    static stringifyValue(val, missingValue = "N/A", truncateLength = 150) {
         if (CommonHelper.isEmpty(val)) {
             return missingValue;
         }
 
-        if (typeof val === "boolean")  {
+        if (typeof val == "number") {
+            return "" + val;
+        }
+
+        if (typeof val == "boolean") {
             return val ? "True" : "False";
         }
 
-        if (typeof val === "string") {
+        if (typeof val == "string") {
             val = val.indexOf("<") >= 0 ? CommonHelper.plainText(val) : val;
-            return CommonHelper.truncate(val) || missingValue;
+            return CommonHelper.truncate(val, truncateLength) || missingValue;
         }
 
-        if (Array.isArray(val)) {
-            return val.join(",");
+        // plain array
+        if (Array.isArray(val) && typeof val[0] != "object") {
+            return CommonHelper.truncate(val.join(","), truncateLength);
         }
 
-        if (typeof val === "object") {
+        // json
+        if (typeof val == "object") {
             try {
-                return CommonHelper.truncate(JSON.stringify(val)) || missingValue;
+                return CommonHelper.truncate(JSON.stringify(val), truncateLength) || missingValue;
             } catch (_) {
                 return missingValue;
             }
         }
 
-        return "" + val;
+        // return as it is
+        return val;
     }
 
     /**
@@ -1532,11 +1750,11 @@ export default class CommonHelper {
 
         let result = [prefix + "id"];
 
-        if (collection.$isView) {
+        if (collection.type === "view") {
             for (let col of CommonHelper.extractColumnsFromQuery(collection.options.query)) {
                 CommonHelper.pushUnique(result, prefix + col);
             }
-        } else if (collection.$isAuth) {
+        } else if (collection.type === "auth") {
             result.push(prefix + "username");
             result.push(prefix + "email");
             result.push(prefix + "emailVisibility");
@@ -1552,6 +1770,138 @@ export default class CommonHelper {
 
         for (const field of schema) {
             CommonHelper.pushUnique(result, prefix + field.name);
+        }
+
+        return result;
+    }
+
+    /**
+     * Generates recursively a list with all the autocomplete field keys
+     * for the collectionNameOrId collection.
+     *
+     * @param  {Array}  collections
+     * @param  {String} collectionNameOrId
+     * @param  {String} [prefix]
+     * @param  {Number} [level]
+     * @return {Array}
+     */
+    static getCollectionAutocompleteKeys(collections, collectionNameOrId, prefix = "", level = 0) {
+        let collection = collections.find((item) => item.name == collectionNameOrId || item.id == collectionNameOrId);
+        if (!collection || level >= 4) {
+            return [];
+        }
+        collection.schema = collection.schema || [];
+
+        let result = CommonHelper.getAllCollectionIdentifiers(collection, prefix);
+
+        for (const field of collection.schema) {
+            const key = prefix + field.name;
+
+            // add relation fields
+            if (field.type == "relation" && field.options?.collectionId) {
+                const subKeys = CommonHelper.getCollectionAutocompleteKeys(collections, field.options.collectionId, key + ".", level + 1);
+                if (subKeys.length) {
+                    result = result.concat(subKeys);
+                }
+            }
+
+            // add ":length" and ":each" field modifiers to arrayble fields
+            if (field.options?.maxSelect != 1 && ["select", "file", "relation"].includes(field.type)) {
+                result.push(key + ":each");
+                result.push(key + ":length");
+            }
+        }
+
+        // add back relations
+        for (const ref of collections) {
+            ref.schema = ref.schema || [];
+            for (const field of ref.schema) {
+                if (field.type == "relation" && field.options?.collectionId == collection.id) {
+                    const key = prefix + ref.name + "_via_" + field.name;
+                    const subKeys = CommonHelper.getCollectionAutocompleteKeys(collections, ref.id, key + ".", level + 2); // +2 to reduce the recursive results
+                    if (subKeys.length) {
+                        result = result.concat(subKeys);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Generates a list with all @collection.* autocomplete field keys.
+     *
+     * @param  {Array} collections
+     * @return {Array}
+     */
+    static getCollectionJoinAutocompleteKeys(collections) {
+        const result = [];
+
+        for (const collection of collections) {
+            const prefix = "@collection." + collection.name + ".";
+            const keys = CommonHelper.getCollectionAutocompleteKeys(collections, collection.name, prefix);
+            for (const key of keys) {
+                result.push(key);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Generates a list with all @request.* autocomplete field keys.
+     *
+     * @param  {Array}  collections
+     * @param  {String} baseCollectionName (used for the `@request.data.*` fields)
+     * @return {Array}
+     */
+    static getRequestAutocompleteKeys(collections, baseCollectionName) {
+        const result = [];
+
+        result.push("@request.context");
+        result.push("@request.method");
+        result.push("@request.query.");
+        result.push("@request.data.");
+        result.push("@request.headers.");
+        result.push("@request.auth.id");
+        result.push("@request.auth.collectionId");
+        result.push("@request.auth.collectionName");
+        result.push("@request.auth.verified");
+        result.push("@request.auth.username");
+        result.push("@request.auth.email");
+        result.push("@request.auth.emailVisibility");
+        result.push("@request.auth.created");
+        result.push("@request.auth.updated");
+
+        // load auth collection fields
+        const authCollections = collections.filter((collection) => collection.type === "auth");
+        for (const collection of authCollections) {
+            const authKeys = CommonHelper.getCollectionAutocompleteKeys(collections, collection.id, "@request.auth.");
+            for (const k of authKeys) {
+                CommonHelper.pushUnique(result, k);
+            }
+        }
+
+        // load base collection fields into @request.data.*
+        if (baseCollectionName) {
+            const issetExcludeList = ["created", "updated"];
+            const keys = CommonHelper.getCollectionAutocompleteKeys(collections, baseCollectionName, "@request.data.");
+            for (const key of keys) {
+                result.push(key);
+
+                // add ":isset" modifier to non-base keys
+                const parts = key.split(".");
+                if (
+                    parts.length === 3 &&
+                    // doesn't contain another modifier
+                    parts[2].indexOf(":") === -1 &&
+                    // is not from the exclude list
+                    !issetExcludeList.includes(parts[2])
+                ) {
+                    result.push(key + ":isset");
+                }
+            }
         }
 
         return result;
@@ -1581,17 +1931,17 @@ export default class CommonHelper {
      */
     static parseIndex(idx) {
         const result = {
-            unique:     false,
-            optional:   false,
+            unique: false,
+            optional: false,
             schemaName: "",
-            indexName:  "",
-            tableName:  "",
-            columns:    [],
-            where:      "",
+            indexName: "",
+            tableName: "",
+            columns: [],
+            where: "",
         };
 
-        const indexRegex = /create\s+(unique\s+)?\s*index\s*(if\s+not\s+exists\s+)?(\S*)\s+on\s+(\S*)\s+\(([\s\S]*)\)(?:\s*where\s+([\s\S]*))?/gmi;
-        const matches    = indexRegex.exec((idx || "").trim())
+        const indexRegex = /create\s+(unique\s+)?\s*index\s*(if\s+not\s+exists\s+)?(\S*)\s+on\s+(\S*)\s*\(([\s\S]*)\)(?:\s*where\s+([\s\S]*))?/gmi;
+        const matches = indexRegex.exec((idx || "").trim())
 
         if (matches?.length != 7) {
             return result;
@@ -1637,9 +1987,9 @@ export default class CommonHelper {
                 continue;
             }
             result.columns.push({
-                name:    colOrExpr,
+                name: colOrExpr,
                 collate: colMatches[2] || "",
-                sort:    colMatches[3]?.toUpperCase() || "",
+                sort: colMatches[3]?.toUpperCase() || "",
             });
         }
 
@@ -1683,26 +2033,26 @@ export default class CommonHelper {
         }
 
         result += nonEmptyCols.map((col) => {
-                let item = "";
+            let item = "";
 
-                if (col.name.includes("(") || col.name.includes(" ")) {
-                    // most likely an expression
-                    item += col.name;
-                } else {
-                    // regular identifier
-                    item += ("`" + col.name + "`");
-                }
+            if (col.name.includes("(") || col.name.includes(" ")) {
+                // most likely an expression
+                item += col.name;
+            } else {
+                // regular identifier
+                item += ("`" + col.name + "`");
+            }
 
-                if (col.collate) {
-                    item += (" COLLATE " + col.collate);
-                }
+            if (col.collate) {
+                item += (" COLLATE " + col.collate);
+            }
 
-                if (col.sort) {
-                    item += (" " + c.sort.toUpperCase());
-                }
+            if (col.sort) {
+                item += (" " + col.sort.toUpperCase());
+            }
 
-                return item;
-            })
+            return item;
+        })
             .join(",\n  ");
 
         if (nonEmptyCols.length > 1) {
@@ -1789,5 +2139,127 @@ export default class CommonHelper {
             : searchTerm;
 
         return fallbackFields.map((f) => `${f}~${searchTerm}`).join("||");
+    }
+
+    /**
+     * The same as normalizeSearchFilter() but with preset common logs fields.
+     *
+     * @param  {String} searchTerm
+     * @param  {Array}  fallbackFields
+     * @return {String}
+     */
+    static normalizeLogsFilter(searchTerm, extraFallbackFields = []) {
+        return CommonHelper.normalizeSearchFilter(searchTerm, ["level", "message", "data"].concat(extraFallbackFields));
+    }
+
+    /**
+     * Iniitialize a new blank Collection POJO and merge it with the provided data (if any).
+     *
+     * @param  {Object} [data]
+     * @return {Object}
+     */
+    static initCollection(data) {
+        return Object.assign({
+            id: '',
+            created: '',
+            updated: '',
+            name: '',
+            type: 'base',
+            system: false,
+            listRule: null,
+            viewRule: null,
+            createRule: null,
+            updateRule: null,
+            deleteRule: null,
+            schema: [],
+            indexes: [],
+            options: {},
+        }, data);
+    }
+
+    /**
+     * Iniitialize a new blank SchemaField POJO and merge it with the provided data (if any).
+     *
+     * @param  {Object} [data]
+     * @return {Object}
+     */
+    static initSchemaField(data) {
+        return Object.assign({
+            id: '',
+            name: '',
+            type: 'text',
+            system: false,
+            required: false,
+            options: {},
+        }, data);
+    }
+
+    /**
+     * Triggers a window resize event.
+     */
+    static triggerResize() {
+        window.dispatchEvent(new Event("resize"))
+    }
+
+    /**
+     * Extracts the hash query parameters from the current url and
+     * returns them as plain object.
+     *
+     * @return {Object}
+     */
+    static getHashQueryParams() {
+        let query = "";
+
+        const queryStart = window.location.hash.indexOf("?");
+        if (queryStart > -1) {
+            query = window.location.hash.substring(queryStart + 1);
+        }
+
+        return Object.fromEntries(new URLSearchParams(query))
+    }
+
+    /**
+     * Replaces the current hash query parameters with the provided `params`
+     * without adding new state to the browser history.
+     *
+     * @param {Object} params
+     */
+    static replaceHashQueryParams(params) {
+        params = params || {};
+
+        let query = "";
+
+        let hash = window.location.hash
+
+        const queryStart = hash.indexOf("?");
+        if (queryStart > -1) {
+            query = hash.substring(queryStart + 1);
+            hash = hash.substring(0, queryStart);
+        }
+
+        const parsed = new URLSearchParams(query)
+
+        for (let key in params) {
+            const val = params[key];
+
+            if (val === null) {
+                parsed.delete(key);
+            } else {
+                parsed.set(key, val);
+            }
+        }
+
+        query = parsed.toString();
+        if (query != "") {
+            hash += ("?" + query);
+        }
+
+        // replace the hash/fragment part with the updated one
+        let href = window.location.href;
+        const hashIndex = href.indexOf("#");
+        if (hashIndex > -1) {
+            href = href.substring(0, hashIndex);
+        }
+        window.location.replace(href + hash);
     }
 }

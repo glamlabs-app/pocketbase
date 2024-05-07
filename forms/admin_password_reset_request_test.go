@@ -10,6 +10,8 @@ import (
 )
 
 func TestAdminPasswordResetRequestValidateAndSubmit(t *testing.T) {
+	t.Parallel()
+
 	testApp, _ := tests.NewTestApp()
 	defer testApp.Cleanup()
 
@@ -74,6 +76,8 @@ func TestAdminPasswordResetRequestValidateAndSubmit(t *testing.T) {
 }
 
 func TestAdminPasswordResetRequestInterceptors(t *testing.T) {
+	t.Parallel()
+
 	testApp, _ := tests.NewTestApp()
 	defer testApp.Cleanup()
 
@@ -117,7 +121,7 @@ func TestAdminPasswordResetRequestInterceptors(t *testing.T) {
 		t.Fatalf("Expected interceptor2 to be called")
 	}
 
-	if interceptorLastResetSentAt.String() == admin.LastResetSentAt.String() {
-		t.Fatalf("Expected the form model to be filled before calling the interceptors")
+	if interceptorLastResetSentAt.String() != admin.LastResetSentAt.String() {
+		t.Fatalf("Expected the form model to NOT be filled before calling the interceptors")
 	}
 }
