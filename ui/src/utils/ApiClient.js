@@ -35,7 +35,7 @@ PocketBase.prototype.error = function (err, notify = true, defaultMsg = "") {
         return;
     }
 
-    const statusCode = (err?.status << 0) || 400;
+    const statusCode = err?.status << 0 || 400;
     const responseData = err?.data || {};
     const msg = responseData.message || err.message || defaultMsg;
 
@@ -70,9 +70,10 @@ PocketBase.prototype.getAdminFileToken = async function (collectionId = "") {
 
     if (collectionId) {
         const protectedCollections = get(protectedFilesCollectionsCache);
-        needToken = typeof protectedCollections[collectionId] !== "undefined"
-            ? protectedCollections[collectionId]
-            : true;
+        needToken =
+            typeof protectedCollections[collectionId] !== "undefined"
+                ? protectedCollections[collectionId]
+                : true;
     }
 
     if (!needToken) {
@@ -96,18 +97,20 @@ PocketBase.prototype.getAdminFileToken = async function (collectionId = "") {
     }
 
     return token;
-}
+};
 
 PocketBase.prototype.migrate = function (source, destination) {
     return fetch(`${import.meta.env.PB_BACKEND_URL}api/glam/migrate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, destination })
-    })
-}
+        body: JSON.stringify({ source, destination }),
+    });
+};
 
 PocketBase.prototype.migrateItems = async function (recordsIds, collectionName, destination) {
-    let resp = await client.collection(collectionName).getFullList({ filter: `${recordsIds.map((e) => 'id="' + e + '"').join(' || ')}` })
+    let resp = await this.collection(collectionName).getFullList({
+        filter: `${recordsIds.map((e) => 'id="' + e + '"').join(" || ")}`,
+    });
     return await fetch(`${import.meta.env.PB_BACKEND_URL}api/glam/migrateItems`, {
         method: "POST",
         body: JSON.stringify({
@@ -115,13 +118,13 @@ PocketBase.prototype.migrateItems = async function (recordsIds, collectionName, 
             destination: destination,
             items: resp,
         }),
-        headers: { "Content-Type": "application/json" }
-    })
-}
+        headers: { "Content-Type": "application/json" },
+    });
+};
 PocketBase.prototype.beforeSend = function (url, options) {
     // Disable caching
-    options.headers = Object.assign({}, options.headers, {"Cache-Control": "no-cache"})
-}
+    options.headers = Object.assign({}, options.headers, { "Cache-Control": "no-cache" });
+};
 
 // Custom auth store to sync the svelte admin store state with the authorized admin instance.
 class AppAuthStore extends LocalAuthStore {
@@ -131,7 +134,8 @@ class AppAuthStore extends LocalAuthStore {
     save(token, model) {
         super.save(token, model);
 
-        if (model && !model.collectionId) { // not an auth record
+        if (model && !model.collectionId) {
+            // not an auth record
             setAdmin(model);
         }
     }
@@ -146,12 +150,10 @@ class AppAuthStore extends LocalAuthStore {
     }
 }
 
-const pb = new PocketBase(
-    import.meta.env.PB_BACKEND_URL,
-    new AppAuthStore("pb_admin_auth")
-);
+const pb = new PocketBase(import.meta.env.PB_BACKEND_URL, new AppAuthStore("pb_admin_auth"));
 
-if (pb.authStore.model && !pb.authStore.model.collectionId) { // not an auth record
+if (pb.authStore.model && !pb.authStore.model.collectionId) {
+    // not an auth record
     setAdmin(pb.authStore.model);
 }
 

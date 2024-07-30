@@ -6,7 +6,7 @@
     import CommonHelper from "@/utils/CommonHelper";
     import tooltip from "@/actions/tooltip";
     import { confirm } from "@/stores/confirmation";
-    import { addSuccessToast } from "@/stores/toasts";
+    import { addSuccessToast, addErrorToast } from "@/stores/toasts";
     import { collections } from "@/stores/collections";
     import SortHeader from "@/components/base/SortHeader.svelte";
     import Toggler from "@/components/base/Toggler.svelte";
